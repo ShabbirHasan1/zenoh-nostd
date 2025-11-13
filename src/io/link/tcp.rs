@@ -1,49 +1,78 @@
-use core::net::SocketAddr;
-
 use crate::{
-    platform::{ZCommunicationError, tcp::PALTcpStream},
+    io::ZLinkError,
+    platform::tcp::{AbstractedTcpRx, AbstractedTcpStream, AbstractedTcpTx},
     result::ZResult,
 };
 
-pub struct LinkTcp<T: PALTcpStream> {
+pub(crate) struct LinkTcp<T: AbstractedTcpStream> {
     stream: T,
-    dst_addr: SocketAddr,
+
+    mtu: u16,
 }
 
-impl<T: PALTcpStream> LinkTcp<T> {
-    pub fn new(stream: T, dst_addr: SocketAddr) -> Self {
-        Self { stream, dst_addr }
+pub(crate) struct LinkTcpTx<T: AbstractedTcpTx> {
+    tx: T,
+}
+
+pub(crate) struct LinkTcpRx<T: AbstractedTcpRx> {
+    rx: T,
+}
+
+impl<T: AbstractedTcpStream> LinkTcp<T> {
+    pub(crate) fn new(stream: T) -> Self {
+        let mtu = stream.mtu();
+
+        Self { stream, mtu }
     }
 
-    pub async fn write(&mut self, buffer: &[u8]) -> ZResult<usize, ZCommunicationError> {
-        self.stream.write(buffer).await
+    pub(crate) fn split(&mut self) -> (LinkTcpTx<T::Tx<'_>>, LinkTcpRx<T::Rx<'_>>) {
+        let (tx, rx) = self.stream.split();
+        let tx = LinkTcpTx { tx };
+        let rx = LinkTcpRx { rx };
+        (tx, rx)
     }
 
-    pub async fn write_all(&mut self, buffer: &[u8]) -> ZResult<(), ZCommunicationError> {
-        self.stream.write_all(buffer).await
+    pub(crate) fn mtu(&self) -> u16 {
+        self.mtu
     }
 
-    pub async fn read(&mut self, buffer: &mut [u8]) -> ZResult<usize, ZCommunicationError> {
-        self.stream.read(buffer).await
-    }
-
-    pub async fn read_exact(&mut self, buffer: &mut [u8]) -> ZResult<(), ZCommunicationError> {
-        self.stream.read_exact(buffer).await
-    }
-
-    pub fn get_dst(&self) -> &SocketAddr {
-        &self.dst_addr
-    }
-
-    pub fn get_mtu(&self) -> u16 {
-        self.stream.mtu()
-    }
-
-    pub fn is_reliable(&self) -> bool {
+    pub(crate) fn is_streamed(&self) -> bool {
         true
     }
 
-    pub fn is_streamed(&self) -> bool {
+    pub(crate) async fn write_all(&mut self, buffer: &[u8]) -> ZResult<(), ZLinkError> {
+        self.stream.write_all(buffer).await.map_err(|e| e.into())
+    }
+
+    pub(crate) async fn read(&mut self, buffer: &mut [u8]) -> ZResult<usize, ZLinkError> {
+        self.stream.read(buffer).await.map_err(|e| e.into())
+    }
+
+    pub(crate) async fn read_exact(&mut self, buffer: &mut [u8]) -> ZResult<(), ZLinkError> {
+        self.stream.read_exact(buffer).await.map_err(|e| e.into())
+    }
+}
+
+impl<T: AbstractedTcpTx> LinkTcpTx<T> {
+    pub(crate) fn is_streamed(&self) -> bool {
         true
+    }
+
+    pub(crate) async fn write_all(&mut self, buffer: &[u8]) -> ZResult<(), ZLinkError> {
+        self.tx.write_all(buffer).await.map_err(|e| e.into())
+    }
+}
+
+impl<T: AbstractedTcpRx> LinkTcpRx<T> {
+    pub(crate) fn is_streamed(&self) -> bool {
+        true
+    }
+
+    pub(crate) async fn read(&mut self, buffer: &mut [u8]) -> ZResult<usize, ZLinkError> {
+        self.rx.read(buffer).await.map_err(|e| e.into())
+    }
+
+    pub(crate) async fn read_exact(&mut self, buffer: &mut [u8]) -> ZResult<(), ZLinkError> {
+        self.rx.read_exact(buffer).await.map_err(|e| e.into())
     }
 }

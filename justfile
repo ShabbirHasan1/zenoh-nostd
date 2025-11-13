@@ -1,23 +1,33 @@
+# Project
+
+clippy:
+    cargo clippy --fix --lib --allow-dirty --allow-staged
+    cargo clippy --features=platform-std --fix --lib --allow-dirty --allow-staged
+    cargo clippy --features=log --fix --lib --allow-dirty --allow-staged
+    cargo clippy --features=defmt --fix --lib --allow-dirty --allow-staged
+    cargo clippy --features=web_console --fix --lib --allow-dirty --allow-staged
+
+    cargo clippy --examples --features=platform-std, --fix --lib --allow-dirty --allow-staged
+    cargo clippy --examples --features=platform-std,log --fix --lib --allow-dirty --allow-staged
+
 test:
-    cargo check
-    cargo check --features=platform-std
-    cargo check --features=log,
-    cargo check --features=defmt
-    cargo check --features=web_console
-
-    cargo check --examples --features=platform-std,
-    cargo check --examples --features=platform-std,log
-
     cargo test codec
 
 bench:
-    cargo bench
+    cargo test bench --profile=release -- --nocapture bench --
+
+# Ping
+
+ping:
+    RUST_LOG=info cargo run --example z_ping --features=platform-std,log --release
+
+pong:
+    RUST_LOG=info cargo run --example z_pong --features=platform-std,log --release
+
+# Examples
 
 std example *args:
-    RUST_LOG=info cargo run --example {{example}} --features=platform-std,log -- {{args}}
-
-wasm example *args:
-    cd platforms/zenoh-nostd-wasm && just wasm {{example}} {{args}}
+    RUST_LOG=trace cargo run --example {{example}} --features=platform-std,log -- {{args}}
 
 esp32s3 example *args:
     cd platforms/zenoh-nostd-embassy && just esp32s3 {{example}} {{args}}

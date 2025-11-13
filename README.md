@@ -28,11 +28,7 @@
 
 ## 🚀 Use Cases
 
-| Use Case               | Suitability     |
-|------------------------|-----------------|
-| IoT microcontrollers   | ✅ Perfect       |
-| Space/Aerospace/Robotics | ✅ Safety-critical |
-| Linux/macOS/Windows    | ✅ Ideal         |
+Soon.
 
 ---
 
@@ -63,21 +59,20 @@ Here’s a simple example of sending a payload with `zenoh-nostd`:
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     let mut session = zenoh_nostd::open!(
-        PlatformStd: (spawner, PlatformStd {}),
-        EndPoint::<32>::from_str(CONNECT.unwrap_or("tcp/127.0.0.1:7447")).unwrap()
+        zenoh_nostd::zconfig!(
+                PlatformStd: (spawner, PlatformStd {}),
+                TX: 512,
+                RX: 512,
+                SUBSCRIBERS: 2
+        ),
+        EndPoint::try_from(CONNECT.unwrap_or("tcp/127.0.0.1:7447")).unwrap()
     )
     .unwrap();
 
     let ke: &'static keyexpr = "demo/example".try_into().unwrap();
     let payload = b"Hello, from std!";
 
-    let mut tx_zbuf = [0u8; 64];
-    session
-        .put(tx_zbuf.as_mut_slice(), ke, payload)
-        .await
-        .unwrap();
-
-    embassy_time::Timer::after(embassy_time::Duration::from_secs(1)).await;
+    session.put(ke, payload).await.unwrap();
 }
 ```
 
@@ -91,16 +86,14 @@ async fn main(spawner: Spawner) {
 
 ## ⚠️ Limitations
 
-* Uses `String<N>` from `heapless` for simplicity in some places. ([#10](https://github.com/ZettaScaleLabs/zenoh-nostd/issues/10))
 * No serial support yet. ([#11](https://github.com/ZettaScaleLabs/zenoh-nostd/issues/11))
-* No dedicated `Subscriber` struct yet. ([#12](https://github.com/ZettaScaleLabs/zenoh-nostd/issues/12))
-* Limited support for key expression subscriptions. ([#13](https://github.com/ZettaScaleLabs/zenoh-nostd/issues/13))
+* No `alloc` support yet. ([#20](https://github.com/ZettaScaleLabs/zenoh-nostd/issues/20))
 
 ---
 
 ## 🧪 Building and Testing
 
-This project uses [`just`](https://github.com/casey/just) for task management. Use `just check` to verify the crate and examples and run the `codec` benchmark.
+This project uses [`just`](https://github.com/casey/just) for task management. Use `just clippy` to verify the crate and examples, `just test` to run the `codec` tests and `just bench` to run the `codec` benchmark.
 
 > 🔍 Pull requests that slow down the codec should be rejected.
 
@@ -112,7 +105,7 @@ Use the following command structure:
 just <platform> <example> [args]
 ```
 
-* **Platforms**: `std`, `wasm`, `esp32s3`
+* **Platforms**: `std`, `esp32s3`
 * **Examples**: `z_put`, `z_sub`
 
 Set the `CONNECT=<endpoint>` environment variable to specify the endpoint (default is `tcp/127.0.0.1:7447`).
@@ -142,30 +135,6 @@ just std z_put
 just std z_sub
 ```
 
-### Example: WebSocket + WASM
-
-Run a Zenoh router with:
-
-```bash
-zenohd -l tcp/127.0.0.1:7447 -l ws/127.0.0.1:7446
-```
-
-Then:
-
-```bash
-# Terminal 1 (WASM)
-CONNECT=ws/127.0.0.1:7446 just wasm z_put
-
-# Terminal 2 (STD)
-just std z_sub
-```
-
-> 📦 Note: For WASM, ensure you have:
->
-> * `wasm32-unknown-unknown` target
-> * `wasm-bindgen-cli`
-> * `basic-http-server` (or similar)
-
 ---
 
 ## 📁 Project Layout
@@ -181,8 +150,7 @@ src/
 └── lib.rs         # Library entry point
 
 platforms/
-├── zenoh-embassy  # Integration with Embassy-based devices
-├── zenoh-wasm32   # WASM32 platform integration
+└── zenoh-embassy  # Integration with Embassy-based devices
 ```
 
 ---

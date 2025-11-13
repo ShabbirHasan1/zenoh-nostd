@@ -4,25 +4,25 @@
 use embassy_sync::blocking_mutex::Mutex;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use esp_hal::rng::Rng;
+use esp_radio::Controller;
+use esp_radio::wifi::{
+    ClientConfig, ModeConfig, WifiController, WifiDevice, WifiEvent, WifiStaState,
+};
 use getrandom::{Error, register_custom_getrandom};
-use zenoh_nostd::{keyexpr::borrowed::keyexpr, protocol::core::endpoint::EndPoint};
+
+use zenoh_nostd::{EndPoint, ZSample, ZSubscriber, keyexpr, zsubscriber};
+
 use zenoh_nostd_embassy::PlatformEmbassy;
 
 use core::num::NonZeroU32;
-use core::str::FromStr;
 
 use embassy_executor::Spawner;
 use embassy_net::{DhcpConfig, Runner, Stack, StackResources};
 use embassy_time::{Duration, Timer};
 use esp_hal::clock::CpuClock;
 use esp_hal::timer::systimer::SystemTimer;
-use esp_hal::timer::timg::TimerGroup;
 use esp_println as _;
 
-use esp_wifi::{
-    EspWifiController,
-    wifi::{ClientConfiguration, Configuration, WifiController, WifiDevice, WifiEvent, WifiState},
-};
 use static_cell::StaticCell;
 
 #[panic_handler]
@@ -38,42 +38,63 @@ esp_bootloader_esp_idf::esp_app_desc!();
 
 const SSID: &str = env!("WIFI_SSID");
 const PASSWORD: &str = env!("WIFI_PASSWORD");
-const CONNECT: &str = env!("CONNECT");
+const CONNECT: Option<&str> = option_env!("CONNECT");
 
-#[esp_hal_embassy::main]
+fn callback_1(sample: &ZSample) {
+    zenoh_nostd::info!(
+        "[Subscription Sync] Received Sample ('{}': '{:?}')",
+        sample.keyexpr().as_str(),
+        core::str::from_utf8(sample.payload()).unwrap()
+    );
+}
+
+#[embassy_executor::task]
+async fn callback_2(subscriber: ZSubscriber<32, 128>) {
+    while let Ok(sample) = subscriber.recv().await {
+        zenoh_nostd::info!(
+            "[Subscription Async] Received Sample ('{}': '{:?}')",
+            sample.keyexpr().as_str(),
+            core::str::from_utf8(sample.payload()).unwrap()
+        );
+    }
+}
+
+#[esp_rtos::main]
 async fn main(spawner: Spawner) {
     zenoh_nostd::info!("zenoh-nostd z_sub example");
 
     let net_stack = init_esp32(spawner).await;
 
     let mut session = zenoh_nostd::open!(
-        PlatformEmbassy: (spawner, PlatformEmbassy { stack: net_stack }),
-        EndPoint::<32>::from_str(CONNECT).unwrap()
+        zenoh_nostd::zconfig!(
+                PlatformEmbassy: (spawner, PlatformEmbassy { stack: net_stack }),
+                TX: 512,
+                RX: 512,
+                MAX_SUBSCRIBERS: 2
+        ),
+        EndPoint::try_from(CONNECT.unwrap_or("tcp/192.168.21.90:7447")).unwrap()
     )
     .unwrap();
 
-    let ke: &'static keyexpr = "demo/example".try_into().unwrap();
+    let ke: &'static keyexpr = "demo/example/**".try_into().unwrap();
 
-    let mut tx_zbuf = [0u8; 256];
-    let subscription_1 = session
-        .declare_subscription(tx_zbuf.as_mut_slice(), ke)
+    let _sync_sub = session
+        .declare_subscriber(ke, zsubscriber!(callback_1))
         .await
         .unwrap();
 
-    let mut rx_buffer = [0u8; 512];
+    let async_sub = session
+        .declare_subscriber(
+            ke,
+            zsubscriber!(QUEUE_SIZE: 8, MAX_KEYEXPR: 32, MAX_PAYLOAD: 128),
+        )
+        .await
+        .unwrap();
+
+    spawner.spawn(callback_2(async_sub)).unwrap();
+
     loop {
-        session
-            .read(rx_buffer.as_mut_slice(), async |subscription, sample| {
-                if subscription == subscription_1 {
-                    zenoh_nostd::info!(
-                        "[Subscription] Received Sample ('{}': '{:?}')",
-                        ke.as_str(),
-                        core::str::from_utf8(sample).unwrap()
-                    );
-                }
-            })
-            .await
-            .unwrap();
+        embassy_time::Timer::after(embassy_time::Duration::from_secs(1)).await;
     }
 }
 
@@ -99,12 +120,11 @@ async fn init_esp32(spawner: Spawner) -> Stack<'static> {
     esp_alloc::heap_allocator!(size: 64 * 1024);
 
     let timer0 = SystemTimer::new(peripherals.SYSTIMER);
-    esp_hal_embassy::init(timer0.alarm0);
+    esp_rtos::start(timer0.alarm0);
 
     defmt::info!("Embassy initialized!");
 
-    let mut rng = esp_hal::rng::Rng::new(peripherals.RNG);
-    let timer1: TimerGroup<'static, _> = TimerGroup::new(peripherals.TIMG0);
+    let rng = Rng::new();
 
     unsafe {
         RNG.lock_mut(|rng_opt| {
@@ -112,23 +132,21 @@ async fn init_esp32(spawner: Spawner) -> Stack<'static> {
         });
     }
 
-    static WIFI_INIT: StaticCell<EspWifiController<'static>> = StaticCell::new();
+    static RADIO_CTRL: StaticCell<Controller<'static>> = StaticCell::new();
+    let radio_ctrl = esp_radio::init().expect("Failed to init radio");
 
-    let wifi_init =
-        esp_wifi::init(timer1.timer0, rng).expect("Failed to initialize WIFI/BLE controller");
-
-    let (wifi_controller, interfaces) =
-        esp_wifi::wifi::new(WIFI_INIT.init(wifi_init), peripherals.WIFI)
-            .expect("Failed to initialize WIFI controller");
+    let (wifi_controller, interfaces) = esp_radio::wifi::new(
+        RADIO_CTRL.init(radio_ctrl),
+        peripherals.WIFI,
+        Default::default(),
+    )
+    .expect("Failed to initialize WIFI controller");
 
     let wifi_interface = interfaces.sta;
-
     let net_seed = rng.random() as u64 | ((rng.random() as u64) << 32);
-
     let dhcp_config = DhcpConfig::default();
-
     let config = embassy_net::Config::dhcpv4(dhcp_config);
-    // Init network stack
+
     static RESOURCES: StaticCell<StackResources<3>> = StaticCell::new();
     let (stack, runner) = embassy_net::new(
         wifi_interface,
@@ -165,22 +183,17 @@ async fn connection(mut controller: WifiController<'static>) {
     defmt::info!("start connection task");
     defmt::info!("Device capabilities: {:?}", controller.capabilities());
     loop {
-        match esp_wifi::wifi::wifi_state() {
-            WifiState::StaConnected => {
-                // wait until we're no longer connected
-                controller.wait_for_event(WifiEvent::StaDisconnected).await;
-                Timer::after(Duration::from_millis(5000)).await
-            }
-            _ => {}
+        if esp_radio::wifi::sta_state() == WifiStaState::Connected {
+            controller.wait_for_event(WifiEvent::StaDisconnected).await;
+            Timer::after(Duration::from_millis(5000)).await
         }
-
         if !matches!(controller.is_started(), Ok(true)) {
-            let client_config = Configuration::Client(ClientConfiguration {
-                ssid: SSID.try_into().unwrap(),
-                password: PASSWORD.try_into().unwrap(),
-                ..Default::default()
-            });
-            controller.set_configuration(&client_config).unwrap();
+            let client_config = ModeConfig::Client(
+                ClientConfig::default()
+                    .with_ssid(SSID.into())
+                    .with_password(PASSWORD.into()),
+            );
+            controller.set_config(&client_config).unwrap();
             defmt::info!("Starting wifi");
             controller.start_async().await.unwrap();
             defmt::info!("Wifi started!");
