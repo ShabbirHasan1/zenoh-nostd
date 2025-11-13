@@ -3,7 +3,10 @@
             Copyright © 2025 ZettaScale Technology SARL.
                        All rights reserved.
 
-This License governs your use of the software made available under it (the “Software”). By using, copying, modifying, or distributing the Software, you agree to be bound by this License. If you do not agree to the terms of this License, do not use, copy, modify, or distribute the Software.
+This License governs your use of the software made available under it (the “Software”). 
+By using, copying, modifying, or distributing the Software, you agree to be bound by 
+this License. If you do not agree to the terms of this License, do not use, copy, modify, 
+or distribute the Software.
 
 1.  Definitions
 
@@ -55,11 +58,18 @@ This License governs your use of the software made available under it (the “So
          to third parties, where the Software is used in their production
          environments.
 
-        For clarity, Non-Commercial Use expressly includes development, staging, and test environments that are not used to provide live services to third parties and do not support live business operations.
+        For clarity, Non-Commercial Use expressly includes development, staging, and 
+        test environments that are not used to provide live services to third parties 
+        and do not support live business operations.
 
-    “Derivative Work” means any work that is based on or derived from the Software, in whole or in part, and in which the Software is modified, translated, adapted, or otherwise altered.
+    “Derivative Work” means any work that is based on or derived from the Software, 
+    in whole or in part, and in which the Software is modified, translated, adapted, 
+    or otherwise altered.
 
-    “Larger Work” means a work that combines or aggregates the Software (or a Derivative Work) with other separate and independent works, such as by static or dynamic linking, inter-process communication, or distribution as part of a larger system.
+    “Larger Work” means a work that combines or aggregates the Software (or a Derivative Work) 
+    with other separate and independent works, such as by static or dynamic linking, 
+    inter-process communication, or distribution as part of a larger system.
+
 
 2.  Grant of Rights for Non-Commercial Use
 
@@ -76,81 +86,142 @@ Any such distribution must:
 
     - include a copy of this License and all relevant copyright and license notices;
     - clearly identify any modifications you have made; and
-    - make clear that the Software (and any parts derived from it) is licensed under this ZettaScale Source-Available (ZSA) License and may not be used for Commercial Deployment without a separate commercial license from ZettaScale.
+    - make clear that the Software (and any parts derived from it) is licensed under this 
+    ZettaScale Source-Available (ZSA) License and may not be used for Commercial Deployment 
+    without a separate commercial license from ZettaScale.
 
-You may contribute modifications or Derivative Works back to ZettaScale’s project under this License or under another license acceptable to ZettaScale. ZettaScale may require you to sign a separate contributor license agreement for such contributions.
+You may contribute modifications or Derivative Works back to ZettaScale’s project under 
+this License or under another license acceptable to ZettaScale. ZettaScale may require you to 
+sign a separate contributor license agreement for such contributions.
+
 
 3. Commercial Deployment Requires Separate License
 
-You may not use the Software, any Derivative Work, or any Larger Work that includes the Software or a Derivative Work, for Commercial Deployment without entering into a separate, explicit commercial license agreement with ZettaScale.
-If you wish to use the Software in a Commercial Deployment, please contact ZettaScale at: [contact at zettascale.tech].
-ZettaScale may, at its discretion, offer the Software under multiple license models, including one or more commercial agreements.
+You may not use the Software, any Derivative Work, or any Larger Work that includes 
+the Software or a Derivative Work, for Commercial Deployment without entering into 
+a separate, explicit commercial license agreement with ZettaScale. If you wish to use 
+the Software in a Commercial Deployment, please contact ZettaScale at: [contact at zettascale.tech]. 
+ZettaScale may, at its discretion, offer the Software under multiple license models, including one 
+or more commercial agreements.
+
 
 4. Restrictions
 
 Except as expressly permitted by this License or by applicable law notwithstanding these terms, you may not:
 
-    - relicense, sublicense, or distribute the Software or any Derivative Work under terms that purport to permit Commercial Deployment without ZettaScale’s prior written consent;
+    - relicense, sublicense, or distribute the Software or any Derivative Work under terms 
+    that purport to permit Commercial Deployment without ZettaScale’s prior written consent;
 
-    - remove, alter, or obscure any copyright, trademark, or other proprietary notices in or on the Software;
+    - remove, alter, or obscure any copyright, trademark, or other proprietary notices in 
+    or on the Software;
 
     - misrepresent the origin of the Software; or
 
-    - use ZettaScale’s trademarks, trade names, or logos in a way that suggests endorsement or affiliation, except as permitted by applicable law.
+    - use ZettaScale’s trademarks, trade names, or logos in a way that suggests endorsement or 
+    affiliation, except as permitted by applicable law.
 
-For avoidance of doubt, you may license your own independent code in a Larger Work under terms of your choice, provided that such terms do not purport to alter or weaken the restrictions of this License as they apply to the Software.
+For avoidance of doubt, you may license your own independent code in a Larger Work under terms of 
+your choice, provided that such terms do not purport to alter or weaken the restrictions of this License 
+as they apply to the Software.
+
 
 5. Patent
 
 5.1 Patent Grant.
 
-Subject to your compliance with this License, ZettaScale hereby grants you a non-exclusive, worldwide, royalty-free, irrevocable (except as provided below) patent license, for Non-Commercial Use only, to make, have made, use, offer to sell, sell, import, and otherwise practice any inventions covered by patent claims owned or controlled by ZettaScale that would be infringed by your use of the Software as distributed by ZettaScale.
+Subject to your compliance with this License, ZettaScale hereby grants you a non-exclusive, worldwide, 
+royalty-free, irrevocable (except as provided below) patent license, for Non-Commercial Use only, 
+to make, have made, use, offer to sell, sell, import, and otherwise practice any inventions covered 
+by patent claims owned or controlled by ZettaScale that would be infringed by your use of the Software 
+as distributed by ZettaScale.
 
-This patent license applies only to the Software as provided by ZettaScale, and to Derivative Works you create that are based on the Software, but only to the extent that the derivative portion would itself infringe ZettaScale’s patent claims.
+This patent license applies only to the Software as provided by ZettaScale, and to Derivative Works 
+you create that are based on the Software, but only to the extent that the derivative portion would 
+itself infringe ZettaScale’s patent claims.
+
 
 5.2 No Patent Rights for Commercial Deployment.
 
-This patent license does not grant any rights to use the Software or any Derivative Work in Commercial Deployment.
-Any patent rights needed for Commercial Deployment must be obtained under a separate commercial agreement with ZettaScale.
+This patent license does not grant any rights to use the Software or any Derivative Work in 
+Commercial Deployment. Any patent rights needed for Commercial Deployment must be obtained 
+under a separate commercial agreement with ZettaScale.
 
 5.3 Patent Retaliation.
 
-If you or your affiliates initiate or participate in a patent infringement claim against ZettaScale or any entity that uses, modifies, or distributes the Software (excluding claims defending yourself against a patent claim), alleging that the Software infringes your patent rights, then all rights granted to you under this License, including the patent license above, will automatically terminate as of the date such claim is filed.
+If you or your affiliates initiate or participate in a patent infringement claim against 
+ZettaScale or any entity that uses, modifies, or distributes the Software (excluding claims 
+defending yourself against a patent claim), alleging that the Software infringes your patent 
+rights, then all rights granted to you under this License, including the patent license above, 
+will automatically terminate as of the date such claim is filed.
 
 5.4 No Other Patent Grants.
 
-Except for the limited Non-Commercial Use patent license explicitly granted above, no other patent rights are granted by this License, whether by implication, estoppel, exhaustion, or otherwise.
+Except for the limited Non-Commercial Use patent license explicitly granted above, no other 
+patent rights are granted by this License, whether by implication, estoppel, exhaustion, 
+or otherwise.
 
 6. Term and Termination
 
-This License is effective from the date you first use, copy, modify, or distribute the Software and continues until terminated.
-Your rights under this License will terminate automatically, without notice from ZettaScale, if you fail to comply with any term of this License. Upon termination, you must immediately cease all use of the Software and destroy all copies of the Software in your possession or control.
-Termination of your rights does not limit any other rights or remedies that ZettaScale may have.
+This License is effective from the date you first use, copy, modify, or distribute the 
+Software and continues until terminated. Your rights under this License will terminate 
+automatically, without notice from ZettaScale, if you fail to comply with any term of 
+this License. Upon termination, you must immediately cease all use of the Software and 
+destroy all copies of the Software in your possession or control. Termination of your 
+rights does not limit any other rights or remedies that ZettaScale may have.
 
 7. No Warranty
 
-THE SOFTWARE IS PROVIDED “AS IS” AND “AS AVAILABLE”, WITHOUT WARRANTY OF ANY KIND. TO THE MAXIMUM EXTENT PERMITTED BY LAW, ZETTASCALE AND ITS LICENSORS DISCLAIM ALL WARRANTIES, WHETHER EXPRESS, IMPLIED, STATUTORY, OR OTHERWISE, INCLUDING, WITHOUT LIMITATION, ANY IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, AND NON-INFRINGEMENT, AS WELL AS ANY WARRANTIES ARISING OUT OF COURSE OF DEALING OR USAGE OF TRADE.
+THE SOFTWARE IS PROVIDED “AS IS” AND “AS AVAILABLE”, WITHOUT WARRANTY OF ANY KIND. 
+TO THE MAXIMUM EXTENT PERMITTED BY LAW, ZETTASCALE AND ITS LICENSORS DISCLAIM ALL 
+WARRANTIES, WHETHER EXPRESS, IMPLIED, STATUTORY, OR OTHERWISE, INCLUDING, WITHOUT 
+LIMITATION, ANY IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR 
+PURPOSE, TITLE, AND NON-INFRINGEMENT, AS WELL AS ANY WARRANTIES ARISING OUT OF 
+COURSE OF DEALING OR USAGE OF TRADE.
+
 
 8. Limitation of Liability
 
-TO THE MAXIMUM EXTENT PERMITTED BY LAW, IN NO EVENT WILL ZETTASCALE OR ITS LICENSORS BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, OR FOR ANY LOSS OF PROFITS, REVENUE, DATA, OR GOODWILL, ARISING OUT OF OR IN CONNECTION WITH THIS LICENSE OR THE USE OR INABILITY TO USE THE SOFTWARE, WHETHER BASED ON CONTRACT, TORT (INCLUDING NEGLIGENCE), STRICT LIABILITY, OR ANY OTHER THEORY, EVEN IF ZETTASCALE HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
-TO THE MAXIMUM EXTENT PERMITTED BY LAW, ZETTASCALE’S TOTAL CUMULATIVE LIABILITY ARISING OUT OF OR RELATING TO THIS LICENSE OR THE SOFTWARE WILL NOT EXCEED ONE HUNDRED (100) GBP.
-Some jurisdictions do not allow the exclusion or limitation of certain damages or warranties, so the above limitations may not apply to you in their entirety.
+TO THE MAXIMUM EXTENT PERMITTED BY LAW, IN NO EVENT WILL ZETTASCALE OR ITS LICENSORS 
+BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, 
+OR FOR ANY LOSS OF PROFITS, REVENUE, DATA, OR GOODWILL, ARISING OUT OF OR IN 
+CONNECTION WITH THIS LICENSE OR THE USE OR INABILITY TO USE THE SOFTWARE, WHETHER 
+BASED ON CONTRACT, TORT (INCLUDING NEGLIGENCE), STRICT LIABILITY, OR ANY OTHER THEORY, 
+EVEN IF ZETTASCALE HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
+TO THE MAXIMUM EXTENT PERMITTED BY LAW, ZETTASCALE’S TOTAL CUMULATIVE LIABILITY 
+ARISING OUT OF OR RELATING TO THIS LICENSE OR THE SOFTWARE WILL NOT EXCEED ONE HUNDRED (100) Euro.
+
+Some jurisdictions do not allow the exclusion or limitation of certain damages or warranties, 
+so the above limitations may not apply to you in their entirety.
+
 
 9. Governing Law and Jurisdiction
 
-This License and any dispute arising out of or in connection with it or the Software will be governed by and construed in accordance with the laws of France, without regard to its conflict-of-laws principles.
-The courts of France will have exclusive jurisdiction over any dispute arising out of or in connection with this License or the Software, and you consent to the personal jurisdiction of those courts.
+This License and any dispute arising out of or in connection with it or the Software will be 
+governed by and construed in accordance with the laws of France, without regard to 
+its conflict-of-laws principles. The courts of France will have exclusive jurisdiction 
+over any dispute arising out of or in connection with this License or the Software, 
+and you consent to the personal jurisdiction of those courts.
+
 
 10. Severability
 
-If any provision of this License is held to be invalid, illegal, or unenforceable, the remaining provisions will remain in full force and effect, and the invalid, illegal, or unenforceable provision will be deemed modified so as to be valid and enforceable to the maximum extent permitted by law, consistent with the intent of the parties.
+If any provision of this License is held to be invalid, illegal, or unenforceable, 
+the remaining provisions will remain in full force and effect, and the invalid, 
+illegal, or unenforceable provision will be deemed modified so as to be valid and 
+enforceable to the maximum extent permitted by law, consistent with the intent of 
+the parties.
+
 
 11. Third-Party Components
 
-The Software may include or be distributed with third-party software components that are subject to separate open source or other license terms. Those terms will govern such components, and nothing in this License is intended to limit your rights under those third-party terms.
+The Software may include or be distributed with third-party software components that 
+are subject to separate open source or other license terms. Those terms will govern 
+such components, and nothing in this License is intended to limit your rights under 
+those third-party terms.
 
 12. Notice
 
-This Software is not “open source” as defined by the Open Source Initiative (OSI). It is source-available with restrictions on commercial use and deployment.
-To obtain a commercial license for Commercial Deployment of the Software, please contact: [contact at zettascale.tech].
+This Software is not “open source” as defined by the Open Source Initiative (OSI). 
+It is source-available with restrictions on commercial use and deployment.
+To obtain a commercial license for Commercial Deployment of the Software, please 
+contact: [contact at zettascale.tech].
