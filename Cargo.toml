@@ -1,7 +1,6 @@
 [workspace]
-members = ["zenoh-nostd-codec"]
-
-exclude = ["platforms/zenoh-nostd-embassy"]
+members = ["crates/zenoh-derive","crates/zenoh-nostd", "crates/zenoh-proto"]
+exclude = ["platforms/zenoh-std", "platforms/zenoh-embassy"]
 
 [workspace.package]
 authors = []
@@ -9,46 +8,47 @@ categories = ["network-programming"]
 description = "Zenoh: The Zero Overhead Pub/Sub/Query Protocol."
 edition = "2024"
 homepage = "http://zenoh.io"
-license = "EPL-2.0 OR Apache-2.0"
+license = "ZSA-1.0"
 repository = "https://github.com/ZettaScaleLabs/zenoh-nostd"
-rust-version = "1.89.0"
+rust-version = "1.90.0"
 version = "0.1.0"
+readme = "README.md"
 
 [workspace.dependencies]
-zenoh-nostd-codec = { version = "0.1.0", path = "zenoh-nostd-codec" }
+zenoh-derive = { version = "0.1.0", path = "crates/zenoh-derive" }
+zenoh-proto = { version = "0.1.0", path = "crates/zenoh-proto" }
+zenoh-nostd = { version = "0.1.0", path = "crates/zenoh-nostd" }
 
 uhlc = { version = "0.8.1", git = "https://github.com/Hennzau/uhlc-rs", branch = "no-alloc", default-features = false }
 sha3 = { version = "0.10.8", default-features = false }
 
-# Proc-macro dependencies
-proc-macro2 = "1.0.103"
-quote = "1.0.41"
-syn = { version = "2.0.108", features = ["full"] }
-
-# Logging
-defmt = { version = "1.0.1" }
-log = { version = "0.4.28" }
-web-sys = { version = "0.3.81", features = ["console"] }
-
 # Embassy (for async/await support)
-embassy-sync = "0.7.2"
 embassy-futures = "0.1.2"
 embassy-time = "0.5.0"
+embassy-sync = "0.7.2"
 embassy-executor = "0.9.1"
 
 # Heapless / static
-heapless = "0.9.1"
+heapless = { version = "0.9.2", default-features = false }
 static_cell = "2.1.1"
 
-# Built-in std support (disabled by default)
-async-net = { version = "2.0.0" }
-socket2 = { version = "0.6.0", features = ["all"] }
-futures-lite = { version = "2.6.1" }
+# Proc macro
+proc-macro2 = "1.0"
+quote = "1.0"
+syn = { version = "2.0", features = ["full"] }
+
+# Logs
+defmt = "1.0"
+log = "0.4"
+
+# Tests
+rand = "0.8"
+criterion = "0.7"
+paste = "1.0"
 
 [package]
-name = "zenoh-nostd"
+name = "zenoh-examples"
 authors.workspace = true
-categories.workspace = true
 description.workspace = true
 edition.workspace = true
 homepage.workspace = true
@@ -56,77 +56,59 @@ license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 version.workspace = true
+readme.workspace = true
 
 [features]
-log = ["dep:log"] # Use `log` crate for logging
-defmt = ["dep:defmt"] # Use `defmt` crate for logging in embedded
-web_console = ["dep:web-sys"] # Use `web-sys` crate for logging in webassembly
+default = []
 
-platform-std = [
-    "dep:async-net",
-    "dep:futures-lite",
-    "dep:socket2"
-] # Use built-in std support (disabled by default)
+log = ["zenoh-nostd/log"]
+defmt = ["zenoh-nostd/defmt"]
+
+std = [
+    "dep:zenoh-std",
+    "dep:env_logger",
+    "embassy-executor/arch-std",
+    "embassy-executor/executor-thread",
+    "embassy-time/std",
+    "dep:critical-section",
+]
+
+esp32s3 = [
+    "dep:zenoh-embassy",
+    "dep:getrandom",
+    "dep:esp-bootloader-esp-idf",
+    "dep:esp-hal",
+    "dep:embassy-net",
+    "dep:esp-alloc",
+    "dep:esp-println",
+    "dep:esp-rtos",
+    "dep:esp-radio",
+]
 
 [dependencies]
-# Zenoh
-zenoh-nostd-codec.workspace = true
+zenoh-nostd = { workspace = true }
+static_cell = { workspace = true }
+embassy-sync = { workspace = true  }
+embassy-executor = { workspace = true }
+embassy-time = { workspace = true }
 
-# Logging
-defmt = { workspace = true, optional = true }
-log = { workspace = true, optional = true }
-web-sys = { workspace = true, optional = true }
+zenoh-std = { version = "0.1.0", path = "platforms/zenoh-std", optional = true }
+zenoh-embassy = { version = "0.1.0", path = "platforms/zenoh-embassy", optional = true }
 
-# Embassy (for async/await support)
-embassy-sync.workspace = true
-embassy-futures.workspace = true
-embassy-time.workspace = true
-embassy-executor.workspace = true
+critical-section = { version = "1.2", features = ["std"], optional = true }
+env_logger = { version = "0.10.0", optional = true}
 
-# Heapless / static
-heapless.workspace = true
-static_cell.workspace = true
-
-# Other
-uhlc.workspace = true
-sha3.workspace = true
-
-# Built-in std support (disabled by default)
-async-net = { workspace = true, optional = true }
-socket2 = { workspace = true, optional = true, features = ["all"] }
-futures-lite = { workspace = true, optional = true }
-
-[dev-dependencies]
-rand = "0.8.5"
-paste = "1.0.15"
-criterion = { version = "0.7.0" }
-env_logger = "0.10.0"
-embassy-executor = { version = "0.9.1", features = ["arch-std", "executor-thread"] }
-embassy-time = { version = "0.5.0", features = ["std"] }
-critical-section = { version = "1.2.0", features = ["std"] }
-
-[[example]]
-path = "examples/z_put.rs"
-name = "z_put"
-required-features = ["platform-std"]
-
-[[example]]
-path = "examples/z_sub.rs"
-name = "z_sub"
-required-features = ["platform-std"]
-
-[[example]]
-path = "examples/z_ping.rs"
-name = "z_ping"
-required-features = ["platform-std"]
-
-[[example]]
-path = "examples/z_pong.rs"
-name = "z_pong"
-required-features = ["platform-std"]
+getrandom = { version = "0.2.16", features = ["custom"], optional = true }
+esp-bootloader-esp-idf = { version = "0.2.0", features = ["esp32s3"], optional = true }
+esp-hal = { version = "1.0.0", features = ["defmt", "esp32s3", "unstable"], optional = true }
+embassy-net = { version = "0.7.1", features = ["defmt", "dhcpv4", "medium-ethernet", "tcp"], optional = true }
+esp-alloc = { version = "0.9.0", features = ["defmt"], optional = true }
+esp-println = { version = "0.15.0", features = ["defmt-espflash", "esp32s3"], optional = true }
+esp-rtos = { version = "0.2.0", features = ["esp32s3", "esp-radio", "embassy"], optional = true }
+esp-radio = { version = "0.17.0", features = ["unstable", "defmt", "esp-alloc", "esp32s3", "smoltcp", "wifi"], optional = true }
 
 [profile.dev]
-opt-level = 0
+opt-level = "s"
 lto = false
 codegen-units = 16
 panic = "abort"
@@ -136,11 +118,11 @@ debug = true
 overflow-checks = true
 
 [profile.release]
-opt-level = 3           # Maximum optimization
-lto = "fat"             # Full Link Time Optimization across all crates
-codegen-units = 1       # Compile in a single unit for better optimization
-panic = "abort"         # Removes stack unwinding code; smaller & faster binaries
-strip = true            # Remove symbol/debug info from final binary
-incremental = false     # Disable incremental compilation for fully optimized builds
-debug = false           # Don’t include debug symbols
-overflow-checks = false # Skip integer overflow checks
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+incremental = false
+debug = false
+overflow-checks = false
