@@ -8,7 +8,7 @@ const CONNECT: Option<&str> = option_env!("CONNECT");
 
 fn callback_1(sample: &ZSample) {
     zenoh_nostd::info!(
-        "[Subscription Sync] Received Sample ('{}': '{:?}')",
+        "[Subscriber] Received Sample ('{}': '{:?}')",
         sample.keyexpr().as_str(),
         core::str::from_utf8(sample.payload()).unwrap()
     );
@@ -18,7 +18,7 @@ fn callback_1(sample: &ZSample) {
 async fn callback_2(subscriber: ZSubscriber<32, 128>) {
     while let Ok(sample) = subscriber.recv().await {
         zenoh_nostd::info!(
-            "[Subscription Async] Received Sample ('{}': '{:?}')",
+            "[Async Subscriber] Received Sample ('{}': '{:?}')",
             sample.keyexpr().as_str(),
             core::str::from_utf8(sample.payload()).unwrap()
         );
@@ -36,28 +36,28 @@ async fn entry(spawner: embassy_executor::Spawner) -> zenoh_nostd::ZResult<()> {
             Platform: (spawner, platform),
             TX: 512,
             RX: 512,
-            MAX_SUBSCRIBERS: 2
+            MAX_SUBSCRIBERS: 2,
+            MAX_QUERIES: 2,
+            MAX_QUERYABLES: 2
     );
 
-    let mut session = zenoh_nostd::open!(
+    let session = zenoh_nostd::open!(
         config,
         EndPoint::try_from(CONNECT.unwrap_or("tcp/127.0.0.1:7447"))?
     );
 
-    let ke = keyexpr::new("demo/example/**").unwrap();
+    let ke = keyexpr::new("demo/example/**")?;
 
     let _sync_sub = session
         .declare_subscriber(ke, zsubscriber!(callback_1))
-        .await
-        .unwrap();
+        .await?;
 
     let async_sub = session
         .declare_subscriber(
             ke,
             zsubscriber!(QUEUE_SIZE: 8, MAX_KEYEXPR: 32, MAX_PAYLOAD: 128),
         )
-        .await
-        .unwrap();
+        .await?;
 
     spawner.spawn(callback_2(async_sub)).unwrap();
 

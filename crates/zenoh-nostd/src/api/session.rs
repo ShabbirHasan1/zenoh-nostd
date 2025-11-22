@@ -1,35 +1,39 @@
-use embassy_sync::channel::DynamicReceiver;
+use embassy_sync::{
+    blocking_mutex::raw::CriticalSectionRawMutex, channel::DynamicReceiver, mutex::Mutex,
+};
 use zenoh_proto::{
     Encoding, EndPoint, WireExpr, ZResult, ZenohIdProto, keyexpr,
     network::{
-        NetworkBody, NodeId, QoS,
-        declare::{Declare, DeclareBody, DeclareSubscriber},
+        NetworkBody, NodeId, QoS, QueryableInfo,
+        declare::{Declare, DeclareBody, DeclareQueryable, DeclareSubscriber},
         push::Push,
     },
     zenoh::{PushBody, put::Put},
 };
 
 use crate::{
-    api::{
-        ZConfig, callback::ZCallback, driver::SessionDriver, sample::ZOwnedSample,
-        subscriber::ZSubscriber,
-    },
+    ZOwnedQuery, ZPublisher, ZQueryable, ZQueryableCallback, ZReply,
+    api::{ZConfig, driver::SessionDriver, sample::ZOwnedSample, subscriber::ZSubscriber},
     io::{
         link::Link,
         transport::{Transport, TransportMineConfig},
     },
     platform::Platform,
+    session::get::GetBuilder,
+    subscriber::callback::ZSubscriberCallback,
 };
+
+pub mod get;
+
+static NEXT_ID: Mutex<CriticalSectionRawMutex, u32> = Mutex::new(0);
 
 pub struct Session<T: Platform + 'static> {
     driver: Option<&'static SessionDriver<T>>,
-
-    next_id: u32,
 }
 
 impl<T: Platform + 'static> Session<T> {
-    pub async fn new<S>(
-        config: ZConfig<T, S>,
+    pub async fn new<S1>(
+        config: ZConfig<T, S1>,
         endpoint: EndPoint,
     ) -> ZResult<(Self, SessionDriver<T>)> {
         let transport = TransportMineConfig {
@@ -46,15 +50,14 @@ impl<T: Platform + 'static> Session<T> {
         let (tx, rx) = config.transport.init(transport).split();
 
         Ok((
-            Self {
-                driver: None,
-                next_id: 0,
-            },
+            Self { driver: None },
             SessionDriver::new(
                 tconfig,
                 (config.tx_zbuf, tx),
                 (config.rx_zbuf, rx),
                 config.subscribers,
+                config.replies,
+                config.queryables,
             ),
         ))
     }
@@ -63,7 +66,7 @@ impl<T: Platform + 'static> Session<T> {
         self.driver = Some(driver);
     }
 
-    pub async fn put(&mut self, ke: &'static keyexpr, bytes: &[u8]) -> ZResult<()> {
+    pub async fn put(&self, ke: &'static keyexpr, bytes: &[u8]) -> ZResult<()> {
         let msg = NetworkBody::Push(Push {
             wire_expr: WireExpr::from(ke),
             qos: QoS::DEFAULT,
@@ -84,17 +87,18 @@ impl<T: Platform + 'static> Session<T> {
     }
 
     pub async fn declare_subscriber<const KE: usize, const PL: usize>(
-        &mut self,
+        &self,
         ke: &'static keyexpr,
         config: (
-            ZCallback,
+            ZSubscriberCallback,
             Option<DynamicReceiver<'static, ZOwnedSample<KE, PL>>>,
         ),
     ) -> ZResult<ZSubscriber<KE, PL>> {
         let wke = WireExpr::from(ke);
 
-        let id = self.next_id;
-        self.next_id += 1;
+        let mut id = NEXT_ID.lock().await;
+        *id += 1;
+        let id = *id;
 
         let msg = NetworkBody::Declare(Declare {
             id: None,
@@ -119,5 +123,54 @@ impl<T: Platform + 'static> Session<T> {
         } else {
             Ok(ZSubscriber::new_sync(id, ke))
         }
+    }
+
+    pub fn declare_publisher(&self, ke: &'static keyexpr) -> ZPublisher<T> {
+        ZPublisher::new(ke, self.driver.as_ref().unwrap())
+    }
+
+    pub fn get(&self, ke: &'static keyexpr, callback: fn(&ZReply<'_>)) -> GetBuilder<'_, T> {
+        GetBuilder::new(self, ke, callback)
+    }
+
+    pub async fn declare_queryable<
+        const MAX_KEYEXPR: usize,
+        const MAX_PARAMETERS: usize,
+        const MAX_PAYLOAD: usize,
+    >(
+        &self,
+        ke: &'static keyexpr,
+        config: (
+            ZQueryableCallback<T>,
+            DynamicReceiver<'static, ZOwnedQuery<T, MAX_KEYEXPR, MAX_PARAMETERS, MAX_PAYLOAD>>,
+        ),
+    ) -> ZResult<ZQueryable<T, MAX_KEYEXPR, MAX_PARAMETERS, MAX_PAYLOAD>> {
+        let wke = WireExpr::from(ke);
+
+        let mut id = NEXT_ID.lock().await;
+        *id += 1;
+        let id = *id;
+
+        let msg = NetworkBody::Declare(Declare {
+            id: None,
+            qos: QoS::DECLARE,
+            timestamp: None,
+            nodeid: NodeId::DEFAULT,
+            body: DeclareBody::DeclareQueryable(DeclareQueryable {
+                id,
+                wire_expr: wke,
+                qinfo: QueryableInfo::DEFAULT,
+            }),
+        });
+
+        self.driver.as_ref().unwrap().send(msg).await?;
+
+        self.driver
+            .as_ref()
+            .unwrap()
+            .register_queryable_callback(id, ke, config.0)
+            .await?;
+
+        Ok(ZQueryable::new(ke, config.1))
     }
 }

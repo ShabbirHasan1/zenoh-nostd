@@ -17,27 +17,28 @@ async fn entry(spawner: embassy_executor::Spawner) -> zenoh_nostd::ZResult<()> {
             Platform: (spawner, platform),
             TX: 512,
             RX: 512,
-            MAX_SUBSCRIBERS: 2
+            MAX_SUBSCRIBERS: 2,
+            MAX_QUERIES: 2,
+            MAX_QUERYABLES: 2
     );
 
-    let mut session = zenoh_nostd::open!(
+    let session = zenoh_nostd::open!(
         config,
         EndPoint::try_from(CONNECT.unwrap_or("tcp/127.0.0.1:7447"))?
     );
 
-    let ke_pong = keyexpr::new("test/pong").unwrap();
-    let ke_ping = keyexpr::new("test/ping").unwrap();
+    let ke_pong = keyexpr::new("test/pong")?;
+    let ke_ping = keyexpr::new("test/ping")?;
 
     let sub = session
         .declare_subscriber(
             ke_ping,
             zsubscriber!(QUEUE_SIZE: 8, MAX_KEYEXPR: 32, MAX_PAYLOAD: 128),
         )
-        .await
-        .unwrap();
+        .await?;
 
     while let Ok(sample) = sub.recv().await {
-        session.put(ke_pong, sample.payload()).await.unwrap();
+        session.put(ke_pong, sample.payload()).await?;
     }
 
     Ok(())

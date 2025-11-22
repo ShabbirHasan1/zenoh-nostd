@@ -1,9 +1,8 @@
 #![cfg_attr(feature = "esp32s3", no_std)]
 #![cfg_attr(feature = "esp32s3", no_main)]
 
-use embassy_time::{Duration, Instant};
 use zenoh_examples::*;
-use zenoh_nostd::{EndPoint, keyexpr, zsubscriber};
+use zenoh_nostd::{EndPoint, keyexpr};
 
 const CONNECT: Option<&str> = option_env!("CONNECT");
 
@@ -11,7 +10,7 @@ async fn entry(spawner: embassy_executor::Spawner) -> zenoh_nostd::ZResult<()> {
     #[cfg(feature = "log")]
     env_logger::init();
 
-    zenoh_nostd::info!("zenoh-nostd z_ping example");
+    zenoh_nostd::info!("zenoh-nostd z_pub example");
 
     let platform = init_platform(&spawner).await;
     let config = zenoh_nostd::zconfig!(
@@ -28,61 +27,20 @@ async fn entry(spawner: embassy_executor::Spawner) -> zenoh_nostd::ZResult<()> {
         EndPoint::try_from(CONNECT.unwrap_or("tcp/127.0.0.1:7447"))?
     );
 
-    let ke_pong = keyexpr::new("test/pong")?;
-    let ke_ping = keyexpr::new("test/ping")?;
+    let publisher = session.declare_publisher(keyexpr::new("demo/example")?);
+    let payload = b"Hello, from no-std!";
 
-    let sub = session
-        .declare_subscriber(
-            ke_pong,
-            zsubscriber!(QUEUE_SIZE: 8, MAX_KEYEXPR: 32, MAX_PAYLOAD: 128),
-        )
-        .await?;
+    loop {
+        publisher.put(payload).await?;
 
-    let data = [0, 1, 2, 3, 4, 5, 6, 7];
+        zenoh_nostd::info!(
+            "[Publisher] Sent PUT ('{}': '{}')",
+            publisher.keyexpr().as_str(),
+            core::str::from_utf8(payload).unwrap()
+        );
 
-    #[cfg(feature = "esp32s3")]
-    extern crate alloc;
-    #[cfg(feature = "esp32s3")]
-    use alloc::vec::Vec;
-
-    let mut samples = Vec::<u64>::with_capacity(100);
-
-    zenoh_nostd::info!("Warming up for 1s");
-    let now = Instant::now();
-
-    while now.elapsed() < Duration::from_secs(1) {
-        session.put(ke_ping, &data).await?;
-
-        let _ = sub.recv().await?;
+        embassy_time::Timer::after(embassy_time::Duration::from_secs(1)).await;
     }
-
-    zenoh_nostd::info!("Starting ping-pong measurements");
-
-    for _ in 0..100 {
-        let start = Instant::now();
-
-        session.put(ke_ping, &data).await?;
-
-        let _ = sub.recv().await?;
-
-        let elapsed = start.elapsed().as_micros();
-        samples.push(elapsed);
-    }
-
-    for (i, rtt) in samples.iter().enumerate().take(100) {
-        zenoh_nostd::info!("{} bytes: seq={} rtt={:?}µs lat={:?}µs", 8, i, rtt, rtt / 2);
-    }
-
-    let avg_rtt: u64 = samples.iter().sum::<u64>() / samples.len() as u64;
-    let avg_lat: u64 = avg_rtt / 2;
-
-    zenoh_nostd::info!(
-        "Average RTT: {:?}µs, Average Latency: {:?}µs",
-        avg_rtt,
-        avg_lat
-    );
-
-    Ok(())
 }
 
 #[cfg_attr(feature = "std", embassy_executor::main)]
