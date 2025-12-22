@@ -1,7 +1,58 @@
-use crate::{ZReadable, exts::*, fields::*, msgs::*};
+use crate::{TransportError, ZReadable, exts::*, fields::*, msgs::*};
 
 #[derive(Debug, PartialEq, Default)]
-pub enum TransportState {
+pub struct TransportState {
+    inner: TransportStateInner,
+}
+
+impl TransportState {
+    pub fn local(&mut self) -> core::result::Result<TransportLocal<'_>, TransportError> {
+        let storage = match self.inner {
+            TransportStateInner::Codec => TransportLocalInner::Codec,
+            TransportStateInner::Opened => TransportLocalInner::Opened,
+            _ => return Err(TransportError::IncompleteState),
+        };
+
+        Ok(TransportLocal {
+            state: self,
+            inner: storage,
+        })
+    }
+
+    pub fn codec() -> Self {
+        Self {
+            inner: TransportStateInner::Codec,
+        }
+    }
+
+    pub fn listen() -> Self {
+        Self {
+            inner: TransportStateInner::WaitingInitSyn,
+        }
+    }
+
+    pub fn connect() -> Self {
+        Self {
+            inner: TransportStateInner::SendingInitSyn,
+        }
+    }
+
+    pub fn is_sending(&self) -> bool {
+        self.inner.is_sending()
+    }
+
+    pub fn is_waiting(&self) -> bool {
+        self.inner.is_waiting()
+    }
+
+    pub fn is_opened(&self) -> bool {
+        self.inner.is_opened()
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Debug, PartialEq, Default)]
+enum TransportStateInner {
     #[default]
     /// No state handling:
     Codec,
@@ -17,42 +68,90 @@ pub enum TransportState {
     WaitingInitAck,
     SendingOpenSyn,
     WaitingOpenAck,
+
+    /// Opened state after handshake.
+    Opened,
 }
 
-impl TransportState {
-    fn handle(&mut self, msg: TransportMessage<'_>) {
-        if matches!(self, Self::Codec) {
-            return;
-        }
-
-        let _ = msg;
-    }
-
+impl TransportStateInner {
     fn is_sending(&self) -> bool {
-        return matches!(
+        matches!(
             self,
-            TransportState::SendingInitSyn { .. }
-                | TransportState::SendingInitAck { .. }
-                | TransportState::SendingOpenSyn { .. }
-                | TransportState::SendingOpenAck { .. }
-        );
+            TransportStateInner::SendingInitSyn { .. }
+                | TransportStateInner::SendingInitAck { .. }
+                | TransportStateInner::SendingOpenSyn { .. }
+                | TransportStateInner::SendingOpenAck { .. }
+        )
     }
 
     fn is_waiting(&self) -> bool {
-        return matches!(
+        matches!(
             self,
-            TransportState::WaitingInitSyn { .. }
-                | TransportState::WaitingInitAck { .. }
-                | TransportState::WaitingOpenSyn { .. }
-                | TransportState::WaitingOpenAck { .. }
-        );
+            TransportStateInner::WaitingInitSyn { .. }
+                | TransportStateInner::WaitingInitAck { .. }
+                | TransportStateInner::WaitingOpenSyn { .. }
+                | TransportStateInner::WaitingOpenAck { .. }
+        )
     }
+
+    pub fn is_opened(&self) -> bool {
+        matches!(self, TransportStateInner::Opened)
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct TransportLocal<'a> {
+    state: &'a mut TransportState,
+    inner: TransportLocalInner<'a>,
+}
+
+impl<'a> TransportLocal<'a> {
+    fn handle(&mut self, msg: TransportMessage<'a>) {
+        if matches!(self.inner, TransportLocalInner::Codec) {
+            return;
+        }
+
+        match msg {
+            TransportMessage::InitSyn(syn) => {
+                self.inner = TransportLocalInner::SendingInitAck { syn };
+            }
+            _ => {}
+        }
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Debug, PartialEq, Default)]
+enum TransportLocalInner<'a> {
+    #[default]
+    /// No state handling:
+    Codec,
+
+    /// States for `listen` mode.
+    WaitingInitSyn,
+    SendingInitAck {
+        syn: InitSyn<'a>,
+    },
+    WaitingOpenSyn,
+    SendingOpenAck,
+
+    /// States for `connect` mode.
+    SendingInitSyn,
+    WaitingInitAck,
+    SendingOpenSyn {
+        cookie: &'a [u8],
+    },
+    WaitingOpenAck,
+
+    /// Opened state after handshake.
+    Opened,
 }
 
 #[derive(Debug)]
 pub struct TransportRx<Buff> {
     rx: Buff,
     cursor: usize,
+    streamed: bool,
 
     frame: Option<FrameHeader>,
 }
@@ -73,8 +172,6 @@ pub struct TransportTx<Buff> {
 pub struct Transport<Buff> {
     pub tx: TransportTx<Buff>,
     pub rx: TransportRx<Buff>,
-
-    streamed: bool,
 
     pub state: TransportState,
 }
@@ -97,16 +194,26 @@ impl<Buff> Transport<Buff> {
             rx: TransportRx {
                 rx: buff,
                 cursor: 0,
+                streamed: false,
                 frame: None,
             },
-            streamed: false,
-            state: TransportState::Codec,
+            state: TransportState::codec(),
         }
     }
 
     pub fn codec(mut self) -> Self {
-        self.state = TransportState::Codec;
-        return self;
+        self.state = TransportState::codec();
+        self
+    }
+
+    pub fn listen(mut self) -> Self {
+        self.state = TransportState::listen();
+        self
+    }
+
+    pub fn connect(mut self) -> Self {
+        self.state = TransportState::connect();
+        self
     }
 
     pub fn batch_size(mut self, batch_size: u16) -> Self {
@@ -116,81 +223,15 @@ impl<Buff> Transport<Buff> {
 
     pub fn streamed(mut self) -> Self {
         self.tx.streamed = true;
-        self.streamed = true;
+        self.rx.streamed = true;
         self
-    }
-
-    pub fn feed(&mut self, data: &[u8])
-    where
-        Buff: AsMut<[u8]>,
-    {
-        if self.state.is_sending() {
-            return;
-        }
-
-        let rx = self.rx.rx.as_mut();
-        let rx = &mut rx[self.rx.cursor..];
-
-        let len = data.len().min(rx.len());
-        rx[..len].copy_from_slice(&data[..len]);
-        self.rx.cursor += len;
-    }
-
-    pub fn feed_exact(&mut self, len: usize, mut data: impl FnMut(&mut [u8]))
-    where
-        Buff: AsMut<[u8]>,
-    {
-        if self.state.is_sending() {
-            return;
-        }
-
-        let rx = self.rx.rx.as_mut();
-        let rx = &mut rx[self.rx.cursor..];
-
-        let len = len.min(rx.len());
-        data(&mut rx[..len]);
-        self.rx.cursor += len;
-    }
-
-    pub fn feed_with(&mut self, mut data: impl FnMut(&mut [u8]) -> usize)
-    where
-        Buff: AsMut<[u8]>,
-    {
-        if self.state.is_sending() {
-            return;
-        }
-
-        let rx = self.rx.rx.as_mut();
-        let rx = &mut rx[self.rx.cursor..];
-
-        if self.streamed {
-            let mut lbuf = [0u8; 2];
-            data(&mut lbuf);
-            let l = u16::from_be_bytes(lbuf) as usize;
-            data(&mut rx[..l]);
-            self.rx.cursor += l;
-        } else {
-            let l = data(&mut rx[..]);
-            self.rx.cursor += l;
-        }
-    }
-
-    pub fn interact<'a>(&'a mut self) -> &'a [u8]
-    where
-        Buff: AsMut<[u8]>,
-    {
-        if self.state.is_waiting() {
-            return &[];
-        }
-
-        &[]
     }
 }
 
 impl<Buff> TransportRx<Buff> {
     fn next<'a>(
         reader: &mut &'a [u8],
-        state: &mut TransportState,
+        local: &mut TransportLocal<'a>,
         frame: &mut Option<FrameHeader>,
     ) -> Option<NetworkMessage<'a>> {
         if !reader.can_read() {
@@ -234,8 +275,8 @@ impl<Buff> TransportRx<Buff> {
             _ => None,
         } {
             frame.take();
-            state.handle(msg);
-            return Self::next(reader, state, frame);
+            local.handle(msg);
+            return Self::next(reader, local, frame);
         }
 
         let reliability = frame.as_ref().map(|f| f.reliability);
@@ -247,7 +288,7 @@ impl<Buff> TransportRx<Buff> {
             FrameHeader::ID => {
                 let header = decode!(FrameHeader);
                 frame.replace(header);
-                return Self::next(reader, state, frame);
+                return Self::next(reader, local, frame);
             }
             Push::ID if net => NetworkBody::Push(decode!(Push)),
             Request::ID if net => NetworkBody::Request(decode!(Request)),
@@ -277,7 +318,7 @@ impl<Buff> TransportRx<Buff> {
 
     pub fn flush<'a>(
         &'a mut self,
-        state: &mut TransportState,
+        local: &mut TransportLocal<'a>,
     ) -> impl Iterator<Item = NetworkMessage<'a>>
     where
         Buff: AsRef<[u8]>,
@@ -286,19 +327,79 @@ impl<Buff> TransportRx<Buff> {
         let mut reader = &rx[..self.cursor];
         let frame = &mut self.frame;
 
-        core::iter::from_fn(move || {
-            return Self::next(&mut reader, state, frame);
-        })
+        core::iter::from_fn(move || Self::next(&mut reader, local, frame))
+    }
+
+    pub fn feed(&mut self, local: &mut TransportLocal, data: &[u8])
+    where
+        Buff: AsMut<[u8]>,
+    {
+        if local.state.is_sending() {
+            return;
+        }
+
+        let rx = self.rx.as_mut();
+        let rx = &mut rx[self.cursor..];
+
+        let len = data.len().min(rx.len());
+        rx[..len].copy_from_slice(&data[..len]);
+        self.cursor += len;
+    }
+
+    pub fn feed_exact(
+        &mut self,
+        local: &mut TransportLocal,
+        len: usize,
+        mut data: impl FnMut(&mut [u8]),
+    ) where
+        Buff: AsMut<[u8]>,
+    {
+        if local.state.is_sending() {
+            return;
+        }
+
+        let rx = self.rx.as_mut();
+        let rx = &mut rx[self.cursor..];
+
+        let len = len.min(rx.len());
+        data(&mut rx[..len]);
+        self.cursor += len;
+    }
+
+    pub fn feed_with(
+        &mut self,
+        local: &mut TransportLocal,
+        mut data: impl FnMut(&mut [u8]) -> usize,
+    ) where
+        Buff: AsMut<[u8]>,
+    {
+        if local.state.is_sending() {
+            return;
+        }
+
+        let rx = self.rx.as_mut();
+        let rx = &mut rx[self.cursor..];
+
+        if self.streamed {
+            let mut lbuf = [0u8; 2];
+            data(&mut lbuf);
+            let l = u16::from_be_bytes(lbuf) as usize;
+            data(&mut rx[..l]);
+            self.cursor += l;
+        } else {
+            let l = data(&mut rx[..]);
+            self.cursor += l;
+        }
     }
 }
 
-impl<Tx> TransportTx<Tx> {
+impl<Buff> TransportTx<Buff> {
     pub fn write<'a, 'b>(
         &'a mut self,
         msgs: impl Iterator<Item = NetworkMessage<'b>>,
     ) -> impl Iterator<Item = &'a [u8]>
     where
-        Tx: AsMut<[u8]>,
+        Buff: AsMut<[u8]>,
     {
         let streamed = self.streamed;
         let mut buffer = self.tx.as_mut();
@@ -346,5 +447,16 @@ impl<Tx> TransportTx<Tx> {
 
             Some(&ret[..])
         })
+    }
+
+    pub fn interact<'a>(&mut self, s: &mut TransportLocal<'a>) -> &'a [u8]
+    where
+        Buff: AsMut<[u8]>,
+    {
+        if s.state.is_waiting() {
+            return &[];
+        }
+
+        &[]
     }
 }

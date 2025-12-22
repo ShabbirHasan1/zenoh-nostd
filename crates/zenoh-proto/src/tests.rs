@@ -1,4 +1,4 @@
-// mod codec;
+mod codec;
 mod ext;
 mod ke;
 mod msgs;

@@ -17,27 +17,6 @@ macro_rules! roundtrip {
 
             assert_eq!(ret, value);
         }
-
-        #[cfg(feature = "alloc")]
-        {
-            // Because random data generation uses the `ZStoreable` unsafe trait, we need
-            // to avoid reallocation during the test to keep pointers valid.
-            let mut rand = alloc::vec::Vec::with_capacity(MAX_PAYLOAD_SIZE);
-            let mut data = alloc::vec::Vec::new();
-
-            for _ in 0..NUM_ITER {
-                rand.clear();
-                data.clear();
-
-                let value = <$ty>::rand(&mut rand);
-
-                $crate::ZEncode::z_encode(&value, &mut data).unwrap();
-
-                let ret = <$ty as $crate::ZDecode>::z_decode(&mut &data[..]).unwrap();
-
-                assert_eq!(ret, value);
-            }
-        }
     }};
 
     (ext, $ty:ty) => {{
@@ -52,27 +31,6 @@ macro_rules! roundtrip {
             let ret = $crate::zext_decode::<$ty>(&mut &data[..]).unwrap();
 
             assert_eq!(ret, value);
-        }
-
-        #[cfg(feature = "alloc")]
-        {
-            // Because random data generation uses the `ZStoreable` unsafe trait, we need
-            // to avoid reallocation during the test to keep pointers valid.
-            let mut rand = alloc::vec::Vec::with_capacity(MAX_PAYLOAD_SIZE);
-            let mut data = alloc::vec::Vec::new();
-
-            for _ in 0..NUM_ITER {
-                rand.clear();
-                data.clear();
-
-                let value = <$ty>::rand(&mut rand);
-
-                $crate::zext_encode::<_, 0x1, true>(&value, &mut data, false).unwrap();
-
-                let ret = $crate::zext_decode::<$ty>(&mut &data[..]).unwrap();
-
-                assert_eq!(ret, value);
-            }
         }
     }};
 }
@@ -204,6 +162,7 @@ fn transport_codec() {
     let mut writer = &mut socket[..];
 
     let mut transport = Transport::new([0u8; MAX_PAYLOAD_SIZE * NUM_ITER]).codec();
+    let mut local = transport.state.local().expect("Incorrect state");
 
     for chunk in transport.tx.write(messages.clone().into_iter()) {
         writer[..chunk.len()].copy_from_slice(chunk);
@@ -212,9 +171,9 @@ fn transport_codec() {
     }
 
     let len = MAX_PAYLOAD_SIZE * NUM_ITER - writer.len();
-    transport.feed(&socket[..len]);
+    transport.rx.feed(&mut local, &socket[..len]);
 
-    for msg in transport.rx.flush(&mut transport.state) {
+    for msg in transport.rx.flush(&mut local) {
         let actual = messages.pop_front().unwrap();
         assert_eq!(msg, actual);
     }
@@ -223,7 +182,23 @@ fn transport_codec() {
 }
 
 #[test]
-fn transport_connect() {}
+fn transport_handshake() {
+    let mut t1 = Transport::new([0u8; MAX_PAYLOAD_SIZE * NUM_ITER]).listen();
+    let mut t2 = Transport::new([0u8; MAX_PAYLOAD_SIZE * NUM_ITER]).connect();
 
-#[test]
-fn transport_listen() {}
+    fn step<const N: usize>(t: &mut Transport<[u8; N]>, socket: &mut [u8]) {
+        let mut l = t.state.local().expect("Incorrect state");
+        t.rx.feed(&mut l, socket);
+        for _ in t.rx.flush(&mut l) {}
+        let i = t.tx.interact(&mut l);
+        socket[..i.len()].copy_from_slice(i);
+    }
+
+    let mut socket = [0u8; MAX_PAYLOAD_SIZE * NUM_ITER];
+    for _ in 0..2 {
+        step(&mut t1, &mut socket);
+        step(&mut t2, &mut socket);
+    }
+
+    assert!(t1.state.is_opened() && t2.state.is_opened());
+}

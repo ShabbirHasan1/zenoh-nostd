@@ -218,14 +218,14 @@ impl HeaderAttribute {
 pub enum ExtAttribute {
     #[default]
     None,
-    Expr(Expr),
+    Expr(Box<Expr>),
 }
 
 impl ExtAttribute {
     fn from_meta(meta: &ParseNestedMeta) -> syn::Result<Self> {
         if meta.path.is_ident("ext") {
             let expr: Expr = meta.value()?.parse()?;
-            return Ok(ExtAttribute::Expr(expr));
+            return Ok(ExtAttribute::Expr(Box::new(expr)));
         }
 
         Ok(ExtAttribute::None)
@@ -236,14 +236,14 @@ impl ExtAttribute {
 pub enum DefaultAttribute {
     #[default]
     None,
-    Expr(Expr),
+    Expr(Box<Expr>),
 }
 
 impl DefaultAttribute {
     fn from_meta(meta: &ParseNestedMeta) -> syn::Result<Self> {
         if meta.path.is_ident("default") {
             let expr: Expr = meta.value()?.parse()?;
-            return Ok(DefaultAttribute::Expr(expr));
+            return Ok(DefaultAttribute::Expr(Box::new(expr)));
         }
 
         Ok(DefaultAttribute::None)

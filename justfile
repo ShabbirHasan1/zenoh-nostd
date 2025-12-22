@@ -36,10 +36,10 @@ loc-proto:
 # Tests and benches
 
 test filter="":
-    cargo test {{filter}} -p zenoh-proto --features=alloc
+    cargo test {{filter}} -p zenoh-proto
 
 bench filter="bench":
-    cargo test -p zenoh-proto {{filter}} --features=alloc --profile=release -- --nocapture --ignored --test-threads=1
+    cargo test -p zenoh-proto {{filter}} --profile=release -- --nocapture --ignored --test-threads=1
 
 # Special `std` examples
 

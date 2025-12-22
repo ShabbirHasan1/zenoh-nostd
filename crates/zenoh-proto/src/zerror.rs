@@ -134,6 +134,9 @@ crate::declare_zerror! {
         #[doc = "Message too large for a batch."]
         #[err = "message too large for a batch"]
         MessageTooLargeForBatch = 56,
+        #[doc = "Tried to make a storage in an incomplete state."]
+        #[err = "tried to make a storage in an incomplete state"]
+        IncompleteState = 57,
     }
 
     // --- Collections related errors ---
