@@ -12,16 +12,18 @@ use crate::{
 };
 
 #[derive(Debug, Default, PartialEq)]
-enum State {
+pub(crate) enum State {
     /// Special state avoiding handshake strategy
     #[default]
     Codec,
 
+    /// State entry point in listening mode
     WaitingInitSyn,
     WaitingOpenSyn {
         zid: ZenohIdProto,
     },
 
+    /// State entry point in connecting mode
     Connecting,
     WaitingInitAck,
     WaitingOpenAck {
@@ -44,7 +46,7 @@ pub(crate) struct TransportState {
     lease: Duration,
     sn: u32,
 
-    inner: State,
+    pub inner: State,
 }
 
 impl Default for TransportState {
@@ -62,9 +64,9 @@ impl Default for TransportState {
 }
 
 #[derive(Debug, PartialEq)]
-pub(crate) struct StateRequest<'a>(TransportMessage<'a>);
+pub(crate) struct StateRequest<'a>(pub TransportMessage<'a>);
 #[derive(Debug, PartialEq)]
-pub(crate) struct StateResponse<'a>(TransportMessage<'a>);
+pub(crate) struct StateResponse<'a>(pub TransportMessage<'a>);
 
 impl TransportState {
     pub fn codec() -> Self {
@@ -74,11 +76,21 @@ impl TransportState {
         }
     }
 
+    pub fn into_codec(mut self) -> Self {
+        self.inner = State::Codec;
+        self
+    }
+
     pub fn listen() -> Self {
         Self {
             inner: State::WaitingInitSyn,
             ..Default::default()
         }
+    }
+
+    pub fn into_listen(mut self) -> Self {
+        self.inner = State::WaitingInitSyn;
+        self
     }
 
     pub fn connect() -> Self {
@@ -88,12 +100,25 @@ impl TransportState {
         }
     }
 
+    pub fn into_connect(mut self) -> Self {
+        self.inner = State::Connecting;
+        self
+    }
+
+    pub fn is_codec(&self) -> bool {
+        matches!(self.inner, State::Codec)
+    }
+
     pub fn zid(&self) -> &ZenohIdProto {
         &self.zid
     }
 
     pub fn batch_size(&self) -> &u16 {
         &self.batch_size
+    }
+
+    pub fn sn(&self) -> &u32 {
+        &self.sn
     }
 
     pub fn resolution(&self) -> &Resolution {
