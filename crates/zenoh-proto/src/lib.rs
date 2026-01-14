@@ -1,14 +1,29 @@
-#![cfg_attr(not(any(feature = "log", feature = "web_console")), no_std)]
+#![cfg_attr(not(feature = "std"), no_std)]
 
-mod logging;
-#[cfg(any(feature = "log", feature = "defmt", feature = "web_console"))]
-pub use logging::*;
+#[cfg(feature = "alloc")]
+extern crate alloc;
 
-mod error;
-pub use error::*;
+pub const VERSION: u8 = 9;
 
-mod protocol;
-pub use protocol::*;
+pub mod logging;
+
+pub mod zerror;
+pub(crate) use zerror::*;
+
+mod bytes;
+pub use bytes::*;
+
+mod codec;
+pub(crate) use codec::*;
+
+mod ke;
+pub use ke::*;
+
+pub mod msgs;
+pub use msgs::{exts, fields};
+
+mod batch;
+pub use batch::*;
 
 pub(crate) use zenoh_derive::*;
 

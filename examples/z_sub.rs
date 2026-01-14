@@ -3,74 +3,48 @@
 #![cfg_attr(feature = "wasm", no_main)]
 
 use zenoh_examples::*;
-use zenoh_nostd::{EndPoint, ZSample, ZSubscriber, keyexpr, zsubscriber};
+use zenoh_nostd as zenoh;
 
-const CONNECT: &str = match option_env!("CONNECT") {
-    Some(v) => v,
-    None => {
-        if cfg!(feature = "wasm") {
-            "ws/127.0.0.1:7446"
-        } else {
-            "tcp/127.0.0.1:7447"
-        }
-    }
-};
-
-fn callback_1(sample: &ZSample) {
-    zenoh_nostd::info!(
-        "[Subscriber] Received Sample ('{}': '{:?}')",
-        sample.keyexpr().as_str(),
-        core::str::from_utf8(sample.payload()).unwrap()
-    );
-}
-
-#[embassy_executor::task]
-async fn callback_2(subscriber: ZSubscriber<32, 128>) {
-    while let Ok(sample) = subscriber.recv().await {
-        zenoh_nostd::info!(
-            "[Async Subscriber] Received Sample ('{}': '{:?}')",
-            sample.keyexpr().as_str(),
-            core::str::from_utf8(sample.payload()).unwrap()
-        );
-    }
-}
-
-async fn entry(spawner: embassy_executor::Spawner) -> zenoh_nostd::ZResult<()> {
+async fn entry(spawner: embassy_executor::Spawner) -> zenoh::ZResult<()> {
     #[cfg(feature = "log")]
     env_logger::init();
 
-    zenoh_nostd::info!("zenoh-nostd z_sub example");
+    zenoh::info!("zenoh-nostd z_sub example");
 
-    let platform = init_platform(&spawner).await;
-    let config = zenoh_nostd::zconfig!(
-            Platform: (spawner, platform),
-            TX: 512,
-            RX: 512,
-            MAX_SUBSCRIBERS: 2,
-            MAX_QUERIES: 2,
-            MAX_QUERYABLES: 2
-    );
+    // All channels that will be used must outlive `Resources`.
+    // **Note**: as a direct implication, you may need to make static channels
+    // if you want a `'static` session.
+    let channel = embassy_sync::channel::Channel::<
+        embassy_sync::blocking_mutex::raw::NoopRawMutex,
+        zenoh::OwnedSample<128, 128>,
+        8,
+    >::new();
 
-    let session = zenoh_nostd::open!(config, EndPoint::try_from(CONNECT)?);
+    let config = init_example(&spawner).await;
+    let mut resources = zenoh::Resources::new();
 
-    let ke = keyexpr::new("demo/example/**")?;
+    let session = zenoh::open(&mut resources, config, zenoh::EndPoint::try_from(CONNECT)?).await?;
 
-    let _sync_sub = session
-        .declare_subscriber(ke, zsubscriber!(callback_1))
+    let subscriber = session
+        .declare_subscriber(zenoh::keyexpr::new("demo/example/**")?)
+        .channel(channel.dyn_sender(), channel.dyn_receiver())
+        .finish()
         .await?;
 
-    let async_sub = session
-        .declare_subscriber(
-            ke,
-            zsubscriber!(QUEUE_SIZE: 8, MAX_KEYEXPR: 32, MAX_PAYLOAD: 128),
-        )
-        .await?;
+    embassy_futures::select::select(session.run(), async {
+        while let Some(sample) = subscriber.recv().await {
+            zenoh::info!(
+                "[Subscriber] Received sample ('{}': '{}')",
+                sample.keyexpr().as_str(),
+                core::str::from_utf8(sample.payload()).unwrap()
+            );
+        }
 
-    spawner.spawn(callback_2(async_sub)).unwrap();
+        Ok::<(), zenoh::Error>(())
+    })
+    .await;
 
-    loop {
-        embassy_time::Timer::after(embassy_time::Duration::from_secs(1)).await;
-    }
+    Ok(())
 }
 
 #[cfg_attr(feature = "std", embassy_executor::main)]
@@ -78,10 +52,10 @@ async fn entry(spawner: embassy_executor::Spawner) -> zenoh_nostd::ZResult<()> {
 #[cfg_attr(feature = "esp32s3", esp_rtos::main)]
 async fn main(spawner: embassy_executor::Spawner) {
     if let Err(e) = entry(spawner).await {
-        zenoh_nostd::error!("Error in main: {:?}", e);
+        zenoh::error!("Error in main: {}", e);
     }
 
-    zenoh_nostd::info!("Exiting main");
+    zenoh::info!("Exiting main");
 }
 
 #[cfg(feature = "esp32s3")]

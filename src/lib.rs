@@ -1,5 +1,10 @@
 #![no_std]
 
+use zenoh_nostd::{
+    FixedCapacityGetCallbacks, FixedCapacityQueryableCallbacks, FixedCapacitySubCallbacks, ZConfig,
+    storage::RawOrBox,
+};
+
 #[cfg(feature = "std")]
 pub use zenoh_std::PlatformStd as Platform;
 
@@ -11,7 +16,7 @@ pub use zenoh_wasm::PlatformWasm as Platform;
 
 #[cfg(feature = "esp32s3")]
 mod esp32s3_app {
-    pub use embassy_net::{DhcpConfig, Runner, StackResources};
+    pub use embassy_net::{DhcpConfig, Runner, StackResources, udp::PacketMetadata};
     pub use embassy_time::{Duration, Timer};
     pub use esp_hal::{clock::CpuClock, rng::Rng, timer::systimer::SystemTimer};
     pub use esp_println as _;
@@ -27,16 +32,85 @@ mod esp32s3_app {
 #[cfg(feature = "esp32s3")]
 use esp32s3_app::*;
 
-pub async fn init_platform(spawner: &embassy_executor::Spawner) -> Platform {
+pub const CONNECT: &str = match option_env!("CONNECT") {
+    Some(v) => v,
+    None => {
+        if cfg!(feature = "wasm") {
+            "ws/127.0.0.1:7446"
+        } else {
+            "tcp/127.0.0.1:7447"
+        }
+    }
+};
+
+pub const PAYLOAD: usize = match usize::from_str_radix(
+    match option_env!("PAYLOAD") {
+        Some(v) => v,
+        None => "8",
+    },
+    10,
+) {
+    Ok(v) => v,
+    Err(_) => 8,
+};
+
+#[cfg(feature = "esp32s3")]
+const BUFF_SIZE: u16 = 512u16;
+#[cfg(feature = "std")]
+const BUFF_SIZE: u16 = u16::MAX;
+#[cfg(feature = "wasm")]
+const BUFF_SIZE: u16 = u16::MAX / 2;
+
+pub struct ExampleConfig {
+    platform: Platform,
+    tx: [u8; BUFF_SIZE as usize],
+    rx: [u8; BUFF_SIZE as usize],
+}
+
+impl ZConfig for ExampleConfig {
+    type Platform = Platform;
+
+    type GetCallbacks<'res> = FixedCapacityGetCallbacks<'res, 8, RawOrBox<1>, RawOrBox<32>>;
+
+    type SubCallbacks<'res> = FixedCapacitySubCallbacks<'res, 8, RawOrBox<56>, RawOrBox<600>>;
+
+    type QueryableCallbacks<'res> =
+        FixedCapacityQueryableCallbacks<'res, Self, 8, RawOrBox<32>, RawOrBox<952>>;
+
+    type TxBuf = [u8; BUFF_SIZE as usize];
+    type RxBuf = [u8; BUFF_SIZE as usize];
+
+    fn platform(&self) -> &Self::Platform {
+        &self.platform
+    }
+
+    fn txrx(&mut self) -> (&mut Self::TxBuf, &mut Self::RxBuf) {
+        (&mut self.tx, &mut self.rx)
+    }
+
+    fn into_parts(self) -> (Self::Platform, Self::TxBuf, Self::RxBuf) {
+        (self.platform, self.tx, self.rx)
+    }
+}
+
+pub async fn init_example(spawner: &embassy_executor::Spawner) -> ExampleConfig {
     #[cfg(feature = "std")]
     {
         let _ = spawner;
-        Platform {}
+        ExampleConfig {
+            platform: Platform {},
+            tx: [0; BUFF_SIZE as usize],
+            rx: [0; BUFF_SIZE as usize],
+        }
     }
     #[cfg(feature = "wasm")]
     {
         let _ = spawner;
-        Platform {}
+        ExampleConfig {
+            platform: Platform {},
+            tx: [0; BUFF_SIZE as usize],
+            rx: [0; BUFF_SIZE as usize],
+        }
     }
     #[cfg(feature = "esp32s3")]
     {
@@ -98,7 +172,37 @@ pub async fn init_platform(spawner: &embassy_executor::Spawner) -> Platform {
         };
         zenoh_nostd::info!("Network initialized with IP: {}", ip);
 
-        Platform { stack }
+        /// This is a naive way, internally it always gives a ref to the same buffer
+        /// so it's UB to create multiple links
+        fn buffers() -> (&'static mut [u8], &'static mut [u8]) {
+            static TX: StaticCell<[u8; BUFF_SIZE as usize]> = StaticCell::new();
+            let tx = TX.init([0; BUFF_SIZE as usize]);
+
+            static RX: StaticCell<[u8; BUFF_SIZE as usize]> = StaticCell::new();
+            let rx = RX.init([0; BUFF_SIZE as usize]);
+
+            (tx, rx)
+        }
+
+        fn metadatas() -> (&'static mut [PacketMetadata], &'static mut [PacketMetadata]) {
+            static TX: StaticCell<[PacketMetadata; 16]> = StaticCell::new();
+            let tx = TX.init([PacketMetadata::EMPTY; 16]);
+
+            static RX: StaticCell<[PacketMetadata; 16]> = StaticCell::new();
+            let rx = RX.init([PacketMetadata::EMPTY; 16]);
+
+            (tx, rx)
+        }
+
+        ExampleConfig {
+            platform: Platform {
+                stack,
+                buffers,
+                metadatas,
+            },
+            tx: [0; BUFF_SIZE as usize],
+            rx: [0; BUFF_SIZE as usize],
+        }
     }
 }
 

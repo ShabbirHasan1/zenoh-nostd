@@ -1,41 +1,30 @@
-use {
-    yawc::WebSocket,
-    zenoh_nostd::{
-        ZResult,
-        platform::{Platform, ZConnectionError},
-    },
-};
+use yawc::WebSocket;
+use zenoh_nostd::platform::ZPlatform;
 
 pub mod ws;
 
 pub struct PlatformWasm;
 
-impl Platform for PlatformWasm {
-    type AbstractedTcpStream = zenoh_nostd::platform::tcp::DummyTcpStream;
-    type AbstractedWsStream = ws::WasmWsStream;
-
-    async fn new_tcp_stream(
-        &self,
-        _addr: &std::net::SocketAddr,
-    ) -> ZResult<Self::AbstractedTcpStream, ZConnectionError> {
-        Err(ZConnectionError::CouldNotConnect)
-    }
+impl ZPlatform for PlatformWasm {
+    type TcpStream = zenoh_nostd::platform::tcp::DummyTcpStream;
+    type UdpSocket = zenoh_nostd::platform::udp::DummyUdpSocket;
+    type WebSocket = ws::WasmWebSocket;
 
     async fn new_websocket_stream(
         &self,
         addr: &std::net::SocketAddr,
-    ) -> ZResult<Self::AbstractedWsStream, ZConnectionError> {
+    ) -> core::result::Result<Self::WebSocket, zenoh_nostd::ConnectionError> {
         let url = format!("ws://{}", addr);
         let socket = WebSocket::connect(url.parse().map_err(|_| {
             zenoh_nostd::error!("Could not parse URL: {url}");
-            ZConnectionError::CouldNotConnect
+            zenoh_nostd::ConnectionError::CouldNotConnect
         })?)
         .await
         .map_err(|_| {
             zenoh_nostd::error!("Could not connect to WebSocket");
-            ZConnectionError::CouldNotConnect
+            zenoh_nostd::ConnectionError::CouldNotConnect
         })?;
-        let peer_addr = *addr;
-        Ok(Self::AbstractedWsStream::new(peer_addr, socket))
+
+        Ok(Self::WebSocket::new(socket))
     }
 }

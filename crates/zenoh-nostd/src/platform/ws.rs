@@ -1,70 +1,46 @@
-use zenoh_proto::ZResult;
-
-use crate::platform::ZConnectionError;
-
-pub trait AbstractedWsStream {
-    type Tx<'a>: AbstractedWsTx
+pub trait ZWebSocket: ZWsTx + ZWsRx {
+    type Tx<'a>: ZWsTx
     where
         Self: 'a;
 
-    type Rx<'a>: AbstractedWsRx
+    type Rx<'a>: ZWsRx
     where
         Self: 'a;
 
     fn split(&mut self) -> (Self::Tx<'_>, Self::Rx<'_>);
 
     fn mtu(&self) -> u16;
+}
 
+pub trait ZWsTx {
     fn write(
         &mut self,
         buffer: &[u8],
-    ) -> impl core::future::Future<Output = ZResult<usize, ZConnectionError>>;
+    ) -> impl core::future::Future<Output = core::result::Result<usize, crate::LinkError>>;
 
     fn write_all(
         &mut self,
         buffer: &[u8],
-    ) -> impl core::future::Future<Output = ZResult<(), ZConnectionError>>;
+    ) -> impl core::future::Future<Output = core::result::Result<(), crate::LinkError>>;
+}
 
+pub trait ZWsRx {
     fn read(
         &mut self,
         buffer: &mut [u8],
-    ) -> impl core::future::Future<Output = ZResult<usize, ZConnectionError>>;
+    ) -> impl core::future::Future<Output = core::result::Result<usize, crate::LinkError>>;
 
     fn read_exact(
         &mut self,
         buffer: &mut [u8],
-    ) -> impl core::future::Future<Output = ZResult<(), ZConnectionError>>;
-}
-
-pub trait AbstractedWsTx {
-    fn write(
-        &mut self,
-        buffer: &[u8],
-    ) -> impl core::future::Future<Output = ZResult<usize, ZConnectionError>>;
-
-    fn write_all(
-        &mut self,
-        buffer: &[u8],
-    ) -> impl core::future::Future<Output = ZResult<(), ZConnectionError>>;
-}
-
-pub trait AbstractedWsRx {
-    fn read(
-        &mut self,
-        buffer: &mut [u8],
-    ) -> impl core::future::Future<Output = ZResult<usize, ZConnectionError>>;
-
-    fn read_exact(
-        &mut self,
-        buffer: &mut [u8],
-    ) -> impl core::future::Future<Output = ZResult<(), ZConnectionError>>;
+    ) -> impl core::future::Future<Output = core::result::Result<(), crate::LinkError>>;
 }
 
 pub struct DummyWsStream;
 pub struct DummyWsTx;
 pub struct DummyWsRx;
 
-impl AbstractedWsStream for DummyWsStream {
+impl ZWebSocket for DummyWsStream {
     type Tx<'a> = DummyWsTx;
     type Rx<'a> = DummyWsRx;
 
@@ -75,40 +51,49 @@ impl AbstractedWsStream for DummyWsStream {
     fn mtu(&self) -> u16 {
         0
     }
+}
 
-    async fn write(&mut self, _buffer: &[u8]) -> ZResult<usize, ZConnectionError> {
-        Err(ZConnectionError::CouldNotWrite)
+impl ZWsTx for DummyWsStream {
+    async fn write(&mut self, _buffer: &[u8]) -> core::result::Result<usize, crate::LinkError> {
+        Err(crate::LinkError::LinkTxFailed)
     }
 
-    async fn write_all(&mut self, _buffer: &[u8]) -> ZResult<(), ZConnectionError> {
-        Err(ZConnectionError::CouldNotWrite)
-    }
-
-    async fn read(&mut self, _buffer: &mut [u8]) -> ZResult<usize, ZConnectionError> {
-        Err(ZConnectionError::CouldNotRead)
-    }
-
-    async fn read_exact(&mut self, _buffer: &mut [u8]) -> ZResult<(), ZConnectionError> {
-        Err(ZConnectionError::CouldNotRead)
+    async fn write_all(&mut self, _buffer: &[u8]) -> core::result::Result<(), crate::LinkError> {
+        Err(crate::LinkError::LinkTxFailed)
     }
 }
 
-impl AbstractedWsTx for DummyWsTx {
-    async fn write(&mut self, _buffer: &[u8]) -> ZResult<usize, ZConnectionError> {
-        Err(ZConnectionError::CouldNotWrite)
+impl ZWsTx for DummyWsTx {
+    async fn write(&mut self, _buffer: &[u8]) -> core::result::Result<usize, crate::LinkError> {
+        Err(crate::LinkError::LinkTxFailed)
     }
 
-    async fn write_all(&mut self, _buffer: &[u8]) -> ZResult<(), ZConnectionError> {
-        Err(ZConnectionError::CouldNotWrite)
+    async fn write_all(&mut self, _buffer: &[u8]) -> core::result::Result<(), crate::LinkError> {
+        Err(crate::LinkError::LinkTxFailed)
     }
 }
 
-impl AbstractedWsRx for DummyWsRx {
-    async fn read(&mut self, _buffer: &mut [u8]) -> ZResult<usize, ZConnectionError> {
-        Err(ZConnectionError::CouldNotRead)
+impl ZWsRx for DummyWsStream {
+    async fn read(&mut self, _buffer: &mut [u8]) -> core::result::Result<usize, crate::LinkError> {
+        Err(crate::LinkError::LinkRxFailed)
     }
 
-    async fn read_exact(&mut self, _buffer: &mut [u8]) -> ZResult<(), ZConnectionError> {
-        Err(ZConnectionError::CouldNotRead)
+    async fn read_exact(
+        &mut self,
+        _buffer: &mut [u8],
+    ) -> core::result::Result<(), crate::LinkError> {
+        Err(crate::LinkError::LinkRxFailed)
+    }
+}
+impl ZWsRx for DummyWsRx {
+    async fn read(&mut self, _buffer: &mut [u8]) -> core::result::Result<usize, crate::LinkError> {
+        Err(crate::LinkError::LinkRxFailed)
+    }
+
+    async fn read_exact(
+        &mut self,
+        _buffer: &mut [u8],
+    ) -> core::result::Result<(), crate::LinkError> {
+        Err(crate::LinkError::LinkRxFailed)
     }
 }

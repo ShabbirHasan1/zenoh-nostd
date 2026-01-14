@@ -34,7 +34,7 @@ pub fn parse(r#struct: &ZenohStruct) -> syn::Result<(TokenStream, TokenStream)> 
                     body.push(quote::quote! {
                         let #access = {
                             let v = header & #slot;
-                            <_ as TryFrom<u8>>::try_from(v >> #slot.trailing_zeros()).map_err(|_| crate::ZCodecError::CouldNotParse)?
+                            <_ as TryFrom<u8>>::try_from(v >> #slot.trailing_zeros()).map_err(|_| crate::CodecError::CouldNotParseHeader)?
                         };
                     });
 
@@ -50,12 +50,12 @@ pub fn parse(r#struct: &ZenohStruct) -> syn::Result<(TokenStream, TokenStream)> 
                     let shift = attr.shift.unwrap_or(0);
 
                     (
-                        quote::quote! { < _ as crate::ZBodyDecode>::z_body_decode(&mut < crate::ZReader as crate::ZReaderExt>::sub(r, #access)?)?, header >> #shift },
+                        quote::quote! { < _ as crate::ZBodyDecode>::z_body_decode(&mut crate::ZReadable::read_slice(r, #access)?)?, header >> #shift },
                         quote::quote! { < _ as crate::ZBodyDecode>::z_body_decode(r, header >> #shift)? },
                     )
                 } else {
                     (
-                        quote::quote! { < _ as crate::ZDecode>::z_decode(&mut < crate::ZReader as crate::ZReaderExt>::sub(r, #access)?)? },
+                        quote::quote! { < _ as crate::ZDecode>::z_decode(&mut crate::ZReadable::read_slice(r, #access)?)? },
                         quote::quote! { < _ as crate::ZDecode>::z_decode(r)? },
                     )
                 };
@@ -146,7 +146,7 @@ pub fn parse(r#struct: &ZenohStruct) -> syn::Result<(TokenStream, TokenStream)> 
                             });
 
                             body_ext.push(quote::quote! {
-                                #id => {
+                                #id if ext_kind == < _ as crate::ZExtResolveKind>::ext_kind(& #access) => {
                                     #access = Some(crate::zext_decode::< _ >(r)?);
                                 }
                             });
@@ -166,7 +166,7 @@ pub fn parse(r#struct: &ZenohStruct) -> syn::Result<(TokenStream, TokenStream)> 
                             #(#body_ext,)*
                             _ => {
                                 if mandatory {
-                                    return Err(crate::ZCodecError::MissingMandatoryExtension);
+                                    return Err(crate::CodecError::CouldNotReadExtension);
                                 }
 
                                 crate::skip_ext(r, ext_kind)?;

@@ -1,130 +1,94 @@
-pub(crate) mod run;
-pub(crate) mod send;
-pub(crate) mod update;
+mod recv;
+mod send;
+mod update;
 
-use core::ops::DerefMut;
+use core::ops::{Deref, DerefMut};
 
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
-use embassy_time::Instant;
-use zenoh_proto::{ZResult, keyexpr};
+use embassy_futures::select::{Either, select};
+use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
+use embassy_time::{Instant, Timer};
+use zenoh_proto::msgs::KeepAlive;
 
 use crate::{
-    ZQueryableCallback, ZRepliesCallback,
-    io::transport::{TransportConfig, TransportRx, TransportTx},
-    platform::Platform,
-    queryable::ZQueryableCallbacks,
-    replies::callback::ZRepliesCallbacks,
-    subscriber::callback::{ZSubscriberCallback, ZSubscriberCallbacks},
+    api::{ZConfig, resources::SessionResources},
+    io::transport::{TransportMineConfig, TransportOtherConfig, TransportRx, TransportTx},
 };
 
-pub struct TxState<T: Platform + 'static> {
-    tx_zbuf: &'static mut [u8],
-    tx: TransportTx<'static, T>,
-    sn: u32,
+pub struct DriverTx<'transport, Config>
+where
+    Config: ZConfig,
+{
+    pub(crate) tx_buf: Config::TxBuf,
+    pub(crate) tx: TransportTx<'transport, Config::Platform>,
+    pub(crate) sn: u32,
 
-    next_keepalive: Instant,
+    pub(crate) next_keepalive: Instant,
+    pub(crate) config: TransportMineConfig,
 }
 
-pub struct RxState<T: Platform + 'static> {
-    rx_zbuf: &'static mut [u8],
-    rx: TransportRx<'static, T>,
+pub struct DriverRx<'transport, Config>
+where
+    Config: ZConfig,
+{
+    pub(crate) rx_buf: Config::RxBuf,
+    pub(crate) rx: TransportRx<'transport, Config::Platform>,
+
+    pub(crate) last_read: Instant,
+    pub(crate) config: TransportOtherConfig,
 }
 
-pub struct SubscriberState {
-    callbacks: &'static mut dyn ZSubscriberCallbacks,
+pub struct Driver<'transport, Config>
+where
+    Config: ZConfig,
+{
+    pub(crate) tx: Mutex<NoopRawMutex, DriverTx<'transport, Config>>,
+    pub(crate) rx: Mutex<NoopRawMutex, DriverRx<'transport, Config>>,
 }
 
-pub struct RepliesState {
-    callbacks: &'static mut dyn ZRepliesCallbacks,
-}
-
-pub struct QueryableState<T: Platform + 'static> {
-    callbacks: &'static mut dyn ZQueryableCallbacks<T>,
-}
-
-pub struct SessionDriver<T: Platform + 'static> {
-    config: TransportConfig,
-
-    tx: Mutex<CriticalSectionRawMutex, TxState<T>>,
-    rx: Mutex<CriticalSectionRawMutex, RxState<T>>,
-
-    subscribers: Mutex<CriticalSectionRawMutex, SubscriberState>,
-    replies: Mutex<CriticalSectionRawMutex, RepliesState>,
-    queryables: Mutex<CriticalSectionRawMutex, QueryableState<T>>,
-}
-
-impl<T: Platform> SessionDriver<T> {
-    pub(crate) fn new(
-        config: TransportConfig,
-        tx: (&'static mut [u8], TransportTx<'static, T>),
-        rx: (&'static mut [u8], TransportRx<'static, T>),
-        subscribers: &'static mut dyn ZSubscriberCallbacks,
-        replies: &'static mut dyn ZRepliesCallbacks,
-        queryables: &'static mut dyn ZQueryableCallbacks<T>,
-    ) -> SessionDriver<T> {
-        SessionDriver {
-            tx: Mutex::new(TxState {
-                tx_zbuf: tx.0,
-                tx: tx.1,
-                sn: config.negociated_config.mine_sn,
-                next_keepalive: Instant::now(),
-            }),
-            rx: Mutex::new(RxState {
-                rx_zbuf: rx.0,
-                rx: rx.1,
-            }),
-            subscribers: Mutex::new(SubscriberState {
-                callbacks: subscribers,
-            }),
-            replies: Mutex::new(RepliesState { callbacks: replies }),
-            queryables: Mutex::new(QueryableState {
-                callbacks: queryables,
-            }),
-            config,
+impl<'transport, Config> Driver<'transport, Config>
+where
+    Config: ZConfig,
+{
+    pub(crate) fn new(tx: DriverTx<'transport, Config>, rx: DriverRx<'transport, Config>) -> Self {
+        Self {
+            tx: Mutex::new(tx),
+            rx: Mutex::new(rx),
         }
     }
+}
 
-    pub(crate) async fn register_subscriber_callback(
+impl<'res, Config> Driver<'res, Config>
+where
+    Config: ZConfig,
+{
+    pub(crate) async fn run(
         &self,
-        id: u32,
-        ke: &'static keyexpr,
-        callback: ZSubscriberCallback,
-    ) -> ZResult<()> {
-        let mut cb_guard = self.subscribers.lock().await;
-        let cb = cb_guard.deref_mut();
+        resources: &SessionResources<'res, Config>,
+    ) -> crate::ZResult<()> {
+        let mut rx_guard = self.rx.lock().await;
+        let rx = rx_guard.deref_mut();
 
-        cb.callbacks.insert(id, ke, callback).map(|_| ())
-    }
+        loop {
+            let write_lease = {
+                let tx_guard = self.tx.lock().await;
+                let tx = tx_guard.deref();
+                Timer::at(tx.next_keepalive())
+            };
 
-    pub(crate) async fn register_query_callback(
-        &self,
-        id: u32,
-        ke: &'static keyexpr,
-        callback: ZRepliesCallback,
-    ) -> ZResult<()> {
-        let mut cb_guard = self.replies.lock().await;
-        let cb = cb_guard.deref_mut();
+            match select(write_lease, rx.recv()).await {
+                Either::First(_) => {
+                    let mut tx_guard = self.tx.lock().await;
+                    let tx = tx_guard.deref_mut();
+                    if Instant::now() >= tx.next_keepalive() {
+                        zenoh_proto::trace!("Sending KeepAlive");
 
-        cb.callbacks.drop_timedout();
-        cb.callbacks.insert(id, ke, callback).map(|_| ())
-    }
-
-    pub async fn remove_query_callback(&self, id: u32) {
-        let mut cb_guard = self.replies.lock().await;
-        let cb = cb_guard.deref_mut();
-
-        cb.callbacks.remove(&id);
-    }
-
-    pub(crate) async fn register_queryable_callback(
-        &self,
-        id: u32,
-        ke: &'static keyexpr,
-        callback: ZQueryableCallback<T>,
-    ) -> ZResult<()> {
-        let mut cb_guard = self.queryables.lock().await;
-        let cb = cb_guard.deref_mut();
-
-        cb.callbacks.insert(id, ke, callback).map(|_| ())
+                        tx.unframed(KeepAlive {}).await?;
+                    }
+                }
+                Either::Second(msg) => {
+                    self.update(msg?, resources).await?;
+                }
+            }
+        }
     }
 }

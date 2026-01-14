@@ -1,138 +1,120 @@
-use core::ops::DerefMut;
-
-use zenoh_proto::{
-    ZResult, keyexpr,
-    network::NetworkBody,
-    transport::{TransportBatch, TransportBody},
-    zenoh::{PushBody, RequestBody, ResponseBody},
-};
+use zenoh_proto::{exts::Value, msgs::*, *};
 
 use crate::{
-    ZQuery, ZReply,
-    api::{driver::SessionDriver, sample::ZSample},
-    platform::Platform,
+    Sample,
+    api::{
+        ZConfig,
+        callbacks::{ZCallbacks, ZDynCallback},
+        resources::SessionResources,
+    },
 };
 
-impl<T: Platform> SessionDriver<T> {
-    pub(crate) async fn internal_update<'a>(&'static self, reader: &'a [u8]) -> ZResult<()> {
-        let mut batch = TransportBatch::new(reader);
+impl<'res, Config> super::Driver<'res, Config>
+where
+    Config: ZConfig,
+{
+    pub(crate) async fn update(
+        &self,
+        reader: &[u8],
+        resources: &SessionResources<'res, Config>,
+    ) -> crate::ZResult<()> {
+        let batch = BatchReader::new(reader);
 
-        while let Some(msg) = batch.next() {
-            match msg? {
-                TransportBody::KeepAlive(_) => {
+        for msg in batch {
+            match msg {
+                Message::KeepAlive(_) => {
                     zenoh_proto::trace!("Received KeepAlive");
                 }
+                Message::Push {
+                    body:
+                        Push {
+                            wire_expr,
+                            payload: PushBody::Put(Put { payload, .. }),
+                            ..
+                        },
+                    ..
+                } => {
+                    let ke = wire_expr.suffix;
+                    let ke = keyexpr::new(ke)?;
+                    let sample = Sample::new(ke, payload);
 
-                TransportBody::Frame(mut frame) => {
-                    for msg in frame.msgs.by_ref() {
-                        match msg? {
-                            NetworkBody::Push(push) => match push.payload {
-                                PushBody::Put(put) => {
-                                    let zbuf: &'a [u8] = put.payload;
-
-                                    let wke: &'a str = push.wire_expr.suffix;
-                                    let wke: &'a keyexpr = keyexpr::new(wke)?;
-
-                                    let mut cb_guard = self.subscribers.lock().await;
-                                    let cb = cb_guard.deref_mut();
-
-                                    let matching_callbacks =
-                                        cb.callbacks.iter().filter_map(|(k, v)| {
-                                            if cb.callbacks.intersects(k, wke) {
-                                                Some(v)
-                                            } else {
-                                                None
-                                            }
-                                        });
-
-                                    for callback in matching_callbacks {
-                                        let sample: ZSample<'a> = ZSample::new(wke, zbuf);
-
-                                        callback.call(sample).await?;
-                                    }
-                                }
-                            },
-                            NetworkBody::Response(resp) => {
-                                let rid = resp.rid;
-
-                                let wke: &'a str = resp.wire_expr.suffix;
-                                let wke: &'a keyexpr = keyexpr::new(wke)?;
-
-                                let mut cb_guard = self.replies.lock().await;
-                                let cb = cb_guard.deref_mut();
-
-                                cb.callbacks.drop_timedout();
-                                let matching_callbacks = cb
-                                    .callbacks
-                                    .iter()
-                                    .filter_map(|(k, v)| if *k == rid { Some(v) } else { None });
-
-                                for callback in matching_callbacks {
-                                    let reply = match &resp.payload {
-                                        ResponseBody::Reply(reply) => match &reply.payload {
-                                            PushBody::Put(put) => {
-                                                let sample = ZSample::new(wke, put.payload);
-
-                                                ZReply::Ok(sample)
-                                            }
-                                        },
-                                        ResponseBody::Err(err) => {
-                                            let sample = ZSample::new(wke, err.payload);
-                                            ZReply::Err(sample)
-                                        }
-                                    };
-
-                                    callback.call(reply);
-                                }
-                            }
-                            NetworkBody::ResponseFinal(resp) => {
-                                let rid = resp.rid;
-
-                                let mut cb_guard = self.replies.lock().await;
-                                let cb = cb_guard.deref_mut();
-
-                                cb.callbacks.remove(&rid);
-                            }
-                            NetworkBody::Request(request) => match request.payload {
-                                RequestBody::Query(query) => {
-                                    let rid = request.id;
-
-                                    let ke: &'a str = request.wire_expr.suffix;
-                                    let ke: &'a keyexpr = keyexpr::new(ke)?;
-
-                                    let mut cb_guard = self.queryables.lock().await;
-                                    let cb = cb_guard.deref_mut();
-
-                                    let matching_callbacks =
-                                        cb.callbacks.iter().filter_map(|(k, v)| {
-                                            if cb.callbacks.intersects(k, ke) {
-                                                Some(v)
-                                            } else {
-                                                None
-                                            }
-                                        });
-
-                                    for callback in matching_callbacks {
-                                        let query = ZQuery::new(
-                                            rid,
-                                            self,
-                                            ke,
-                                            match query.parameters {
-                                                "" => None,
-                                                p => Some(p),
-                                            },
-                                            match &query.body {
-                                                None => None,
-                                                Some(v) => Some(v.payload),
-                                            },
-                                        );
-
-                                        callback.call(query).await?;
-                                    }
-                                }
-                            },
-                            _ => {}
+                    let mut sub_cb = resources.sub_callbacks.lock().await;
+                    for cb in sub_cb.intersects(ke) {
+                        cb.call(&sample).await;
+                    }
+                }
+                Message::Response {
+                    body:
+                        Response {
+                            rid,
+                            wire_expr,
+                            payload,
+                            ..
+                        },
+                    ..
+                } => {
+                    let ke = wire_expr.suffix;
+                    let ke = keyexpr::new(ke)?;
+                    let response = match payload {
+                        ResponseBody::Reply(Reply {
+                            payload: PushBody::Put(Put { payload, .. }),
+                            ..
+                        }) => crate::Response::Ok(crate::Sample::new(ke, payload)),
+                        ResponseBody::Err(Err { payload, .. }) => {
+                            crate::Response::Err(crate::Sample::new(ke, payload))
                         }
+                    };
+
+                    let mut get_cb = resources.get_callbacks.lock().await;
+                    if let Some(cb) = get_cb.get(rid) {
+                        cb.call(&response).await;
+                    }
+                }
+                Message::ResponseFinal {
+                    body: ResponseFinal { rid, .. },
+                    ..
+                } => {
+                    let mut res = resources.get_callbacks.lock().await;
+                    res.remove(rid)?;
+
+                    // TODO: also close channels
+                }
+                Message::Request {
+                    body:
+                        Request {
+                            id,
+                            wire_expr,
+                            payload:
+                                RequestBody::Query(Query {
+                                    parameters, body, ..
+                                }),
+                            ..
+                        },
+                    ..
+                } => {
+                    let ke = wire_expr.suffix;
+                    let ke = keyexpr::new(ke)?;
+                    let query = crate::api::Query::new(
+                        self,
+                        resources,
+                        id,
+                        ke,
+                        if parameters.is_empty() {
+                            None
+                        } else {
+                            Some(parameters)
+                        },
+                        match body {
+                            Some(Value { payload, .. }) => Some(payload),
+                            None => None,
+                        },
+                    );
+
+                    let mut queryable_cb = resources.queryable_callbacks.lock().await;
+                    let count = queryable_cb.intersects(ke).count();
+                    queryable_cb.set_counter(id, count)?;
+                    for cb in queryable_cb.intersects(ke) {
+                        cb.call(&query).await;
                     }
                 }
                 _ => {}

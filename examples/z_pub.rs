@@ -3,48 +3,46 @@
 #![cfg_attr(feature = "wasm", no_main)]
 
 use zenoh_examples::*;
-use zenoh_nostd::{EndPoint, keyexpr};
+use zenoh_nostd as zenoh;
 
-const CONNECT: &str = match option_env!("CONNECT") {
-    Some(v) => v,
-    None => {
-        if cfg!(feature = "wasm") {
-            "ws/127.0.0.1:7446"
-        } else {
-            "tcp/127.0.0.1:7447"
-        }
+#[embassy_executor::task]
+async fn session_task(session: &'static zenoh::Session<'static, ExampleConfig>) {
+    if let Err(e) = session.run().await {
+        zenoh::error!("Error in session task: {}", e);
     }
-};
+}
 
-async fn entry(spawner: embassy_executor::Spawner) -> zenoh_nostd::ZResult<()> {
+async fn entry(spawner: embassy_executor::Spawner) -> zenoh::ZResult<()> {
     #[cfg(feature = "log")]
     env_logger::init();
 
-    zenoh_nostd::info!("zenoh-nostd z_pub example");
+    zenoh::info!("zenoh-nostd z_pub example");
 
-    let platform = init_platform(&spawner).await;
-    let config = zenoh_nostd::zconfig!(
-            Platform: (spawner, platform),
-            TX: 512,
-            RX: 512,
-            MAX_SUBSCRIBERS: 2,
-            MAX_QUERIES: 2,
-            MAX_QUERYABLES: 2
-    );
+    let config = init_example(&spawner).await;
+    let session = zenoh::open!(config => ExampleConfig, zenoh::EndPoint::try_from(CONNECT)?);
 
-    let session = zenoh_nostd::open!(config, EndPoint::try_from(CONNECT)?);
+    spawner.spawn(session_task(session)).map_err(|e| {
+        zenoh::error!("Error spawning task: {}", e);
+        zenoh::SessionError::CouldNotSpawnEmbassyTask
+    })?;
 
-    let publisher = session.declare_publisher(keyexpr::new("demo/example")?);
+    zenoh::info!("Declaring publisher");
+
+    let publisher = session
+        .declare_publisher(zenoh::keyexpr::new("demo/example")?)
+        .finish()
+        .await?;
+
     let payload = b"Hello, from no-std!";
 
     loop {
-        publisher.put(payload).await?;
-
-        zenoh_nostd::info!(
-            "[Publisher] Sent PUT ('{}': '{}')",
-            publisher.keyexpr().as_str(),
-            core::str::from_utf8(payload).unwrap()
-        );
+        if publisher.put(payload).finish().await.is_ok() {
+            zenoh::info!(
+                "[Publisher] Sent PUT ('{}': '{}')",
+                publisher.keyexpr().as_str(),
+                core::str::from_utf8(payload).unwrap()
+            );
+        }
 
         embassy_time::Timer::after(embassy_time::Duration::from_secs(1)).await;
     }
@@ -55,10 +53,10 @@ async fn entry(spawner: embassy_executor::Spawner) -> zenoh_nostd::ZResult<()> {
 #[cfg_attr(feature = "esp32s3", esp_rtos::main)]
 async fn main(spawner: embassy_executor::Spawner) {
     if let Err(e) = entry(spawner).await {
-        zenoh_nostd::error!("Error in main: {:?}", e);
+        zenoh::error!("Error in main: {}", e);
     }
 
-    zenoh_nostd::info!("Exiting main");
+    zenoh::info!("Exiting main");
 }
 
 #[cfg(feature = "esp32s3")]

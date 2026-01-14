@@ -1,5 +1,4 @@
 use {
-    core::net::SocketAddr,
     futures_util::{
         SinkExt as _, StreamExt as _,
         stream::{SplitSink, SplitStream},
@@ -9,27 +8,21 @@ use {
         frame::{FrameView, OpCode},
     },
     zenoh_nostd::{
-        ZResult,
-        platform::{
-            ZConnectionError,
-            ws::{AbstractedWsRx, AbstractedWsStream, AbstractedWsTx},
-        },
+        platform::ws::{ZWebSocket, ZWsRx, ZWsTx},
         zbail,
     },
 };
 
-pub struct WasmWsStream {
-    pub peer_addr: SocketAddr,
-    pub sink: SplitSink<WebSocket, FrameView>,
-    pub stream: SplitStream<WebSocket>,
-    pub mtu: u16,
+pub struct WasmWebSocket {
+    sink: SplitSink<WebSocket, FrameView>,
+    stream: SplitStream<WebSocket>,
+    mtu: u16,
 }
 
-impl WasmWsStream {
-    pub fn new(peer_addr: SocketAddr, stream: WebSocket) -> Self {
+impl WasmWebSocket {
+    pub fn new(stream: WebSocket) -> Self {
         let (sink, stream) = stream.split();
         Self {
-            peer_addr,
             sink,
             stream,
             mtu: u16::MAX,
@@ -38,14 +31,14 @@ impl WasmWsStream {
 }
 
 pub struct WasmWsTx<'a> {
-    pub sink: &'a mut SplitSink<WebSocket, FrameView>,
+    sink: &'a mut SplitSink<WebSocket, FrameView>,
 }
 
 pub struct WasmWsRx<'a> {
-    pub stream: &'a mut SplitStream<WebSocket>,
+    stream: &'a mut SplitStream<WebSocket>,
 }
 
-impl AbstractedWsStream for WasmWsStream {
+impl ZWebSocket for WasmWebSocket {
     type Tx<'a> = WasmWsTx<'a>;
     type Rx<'a> = WasmWsRx<'a>;
 
@@ -62,26 +55,63 @@ impl AbstractedWsStream for WasmWsStream {
         };
         (tx, rx)
     }
+}
 
-    async fn write(&mut self, buffer: &[u8]) -> ZResult<usize, ZConnectionError> {
+impl ZWsTx for WasmWebSocket {
+    async fn write(
+        &mut self,
+        buffer: &[u8],
+    ) -> core::result::Result<usize, zenoh_nostd::LinkError> {
         let mut tx = WasmWsTx {
             sink: &mut self.sink,
         };
         tx.write(buffer).await
     }
 
-    async fn write_all(&mut self, buffer: &[u8]) -> ZResult<(), ZConnectionError> {
+    async fn write_all(
+        &mut self,
+        buffer: &[u8],
+    ) -> core::result::Result<(), zenoh_nostd::LinkError> {
         self.write(buffer).await.map(|_| ())
     }
+}
 
-    async fn read(&mut self, buffer: &mut [u8]) -> ZResult<usize, ZConnectionError> {
+impl ZWsTx for WasmWsTx<'_> {
+    async fn write(
+        &mut self,
+        buffer: &[u8],
+    ) -> core::result::Result<usize, zenoh_nostd::LinkError> {
+        let item = FrameView::binary(buffer.to_vec());
+        self.sink
+            .send(item)
+            .await
+            .map_err(|_| zenoh_nostd::LinkError::LinkTxFailed)
+            .map(|_| buffer.len())
+    }
+
+    async fn write_all(
+        &mut self,
+        buffer: &[u8],
+    ) -> core::result::Result<(), zenoh_nostd::LinkError> {
+        self.write(buffer).await.map(|_| ())
+    }
+}
+
+impl ZWsRx for WasmWebSocket {
+    async fn read(
+        &mut self,
+        buffer: &mut [u8],
+    ) -> core::result::Result<usize, zenoh_nostd::LinkError> {
         let mut rx = WasmWsRx {
             stream: &mut self.stream,
         };
         rx.read(buffer).await
     }
 
-    async fn read_exact(&mut self, buffer: &mut [u8]) -> ZResult<(), ZConnectionError> {
+    async fn read_exact(
+        &mut self,
+        buffer: &mut [u8],
+    ) -> core::result::Result<(), zenoh_nostd::LinkError> {
         let mut rx = WasmWsRx {
             stream: &mut self.stream,
         };
@@ -89,25 +119,13 @@ impl AbstractedWsStream for WasmWsStream {
     }
 }
 
-impl AbstractedWsTx for WasmWsTx<'_> {
-    async fn write(&mut self, buffer: &[u8]) -> ZResult<usize, ZConnectionError> {
-        let item = FrameView::binary(buffer.to_vec());
-        self.sink
-            .send(item)
-            .await
-            .map_err(|_| ZConnectionError::CouldNotWrite)
-            .map(|_| buffer.len())
-    }
-
-    async fn write_all(&mut self, buffer: &[u8]) -> ZResult<(), ZConnectionError> {
-        self.write(buffer).await.map(|_| ())
-    }
-}
-
-impl AbstractedWsRx for WasmWsRx<'_> {
-    async fn read(&mut self, buffer: &mut [u8]) -> ZResult<usize, ZConnectionError> {
+impl ZWsRx for WasmWsRx<'_> {
+    async fn read(
+        &mut self,
+        buffer: &mut [u8],
+    ) -> core::result::Result<usize, zenoh_nostd::LinkError> {
         let Some(Ok(frame)) = self.stream.next().await else {
-            return Err(ZConnectionError::CouldNotRead);
+            return Err(zenoh_nostd::LinkError::LinkRxFailed);
         };
         match frame.opcode {
             OpCode::Binary => {
@@ -115,20 +133,23 @@ impl AbstractedWsRx for WasmWsRx<'_> {
                 buffer[..len].copy_from_slice(&frame.payload[..len]);
                 Ok(len)
             }
-            _ => zbail!(ZConnectionError::CouldNotRead),
+            _ => zbail!(zenoh_nostd::LinkError::LinkRxFailed),
         }
     }
 
-    async fn read_exact(&mut self, buffer: &mut [u8]) -> ZResult<(), ZConnectionError> {
+    async fn read_exact(
+        &mut self,
+        buffer: &mut [u8],
+    ) -> core::result::Result<(), zenoh_nostd::LinkError> {
         let Some(Ok(frame)) = self.stream.next().await else {
-            return Err(ZConnectionError::CouldNotRead);
+            return Err(zenoh_nostd::LinkError::LinkRxFailed);
         };
         match (frame.opcode, frame.payload.len()) {
             (OpCode::Binary, len) if len == buffer.len() => {
                 buffer.copy_from_slice(&frame.payload);
                 Ok(())
             }
-            _ => zbail!(ZConnectionError::CouldNotRead),
+            _ => zbail!(zenoh_nostd::LinkError::LinkRxFailed),
         }
     }
 }

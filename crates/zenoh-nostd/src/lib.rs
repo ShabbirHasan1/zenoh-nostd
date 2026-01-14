@@ -1,11 +1,11 @@
-#![cfg_attr(not(any(feature = "log", feature = "web_console")), no_std)]
+#![cfg_attr(not(feature = "std"), no_std)]
+
+#[cfg(feature = "alloc")]
+extern crate alloc;
 
 mod api;
+mod io;
+
 pub use api::*;
-
-pub(crate) mod io;
-pub use io::transport::Transport;
-
 pub mod platform;
-
-pub use zenoh_proto::*;
+pub use zenoh_proto::{debug, error, info, logging, trace, warn, zbail, zctx, zerror::*};

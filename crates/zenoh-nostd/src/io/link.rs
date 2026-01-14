@@ -1,154 +1,311 @@
 use core::{net::SocketAddr, str::FromStr};
 
-use zenoh_proto::{EndPoint, ZResult};
-
 use crate::{
-    io::{
-        ZLinkError,
-        link::tcp::{LinkTcp, LinkTcpRx, LinkTcpTx},
-        link::ws::{LinkWs, LinkWsRx, LinkWsTx},
+    api::EndPoint,
+    io::link::{
+        tcp::{LinkTcp, LinkTcpRx, LinkTcpTx},
+        udp::{LinkUdp, LinkUdpRx, LinkUdpTx},
+        ws::{LinkWs, LinkWsRx, LinkWsTx},
     },
-    platform::Platform,
+    platform::{ZPlatform, tcp::ZTcpStream, udp::ZUdpSocket, ws::ZWebSocket},
 };
 
-pub(crate) mod tcp;
-pub(crate) mod ws;
+mod tcp;
+mod udp;
+mod ws;
 
-pub(crate) enum LinkTx<'a, T: Platform>
+pub trait ZLinkInfo {
+    fn mtu(&self) -> u16;
+
+    fn is_streamed(&self) -> bool;
+}
+
+pub trait ZLinkTx: ZLinkInfo {
+    #[allow(unused)]
+    fn write(
+        &mut self,
+        buffer: &[u8],
+    ) -> impl core::future::Future<Output = core::result::Result<usize, crate::LinkError>>;
+
+    fn write_all(
+        &mut self,
+        buffer: &[u8],
+    ) -> impl core::future::Future<Output = core::result::Result<(), crate::LinkError>>;
+}
+
+pub trait ZLinkRx: ZLinkInfo {
+    fn read(
+        &mut self,
+        buffer: &mut [u8],
+    ) -> impl core::future::Future<Output = core::result::Result<usize, crate::LinkError>>;
+
+    fn read_exact(
+        &mut self,
+        buffer: &mut [u8],
+    ) -> impl core::future::Future<Output = core::result::Result<(), crate::LinkError>>;
+}
+
+pub trait ZLink: ZLinkInfo + ZLinkTx + ZLinkRx {
+    type Tx<'a>: ZLinkTx
+    where
+        Self: 'a;
+
+    type Rx<'a>: ZLinkRx
+    where
+        Self: 'a;
+
+    fn split(&mut self) -> (Self::Tx<'_>, Self::Rx<'_>);
+}
+
+pub enum LinkTx<'a, Platform>
 where
-    T: 'a,
+    Platform: ZPlatform + 'a,
 {
-    LinkTcpTx(
-        LinkTcpTx<<T::AbstractedTcpStream as crate::platform::tcp::AbstractedTcpStream>::Tx<'a>>,
-    ),
-    LinkWsTx(LinkWsTx<<T::AbstractedWsStream as crate::platform::ws::AbstractedWsStream>::Tx<'a>>),
+    Tcp(LinkTcpTx<<Platform::TcpStream as ZTcpStream>::Tx<'a>>),
+    Udp(LinkUdpTx<<Platform::UdpSocket as ZUdpSocket>::Tx<'a>>),
+    Ws(LinkWsTx<<Platform::WebSocket as ZWebSocket>::Tx<'a>>),
 }
 
-pub(crate) enum LinkRx<'a, T: Platform>
+pub enum LinkRx<'a, Platform>
 where
-    T: 'a,
+    Platform: ZPlatform + 'a,
 {
-    LinkTcpRx(
-        LinkTcpRx<<T::AbstractedTcpStream as crate::platform::tcp::AbstractedTcpStream>::Rx<'a>>,
-    ),
-    LinkWsRx(LinkWsRx<<T::AbstractedWsStream as crate::platform::ws::AbstractedWsStream>::Rx<'a>>),
+    Tcp(LinkTcpRx<<Platform::TcpStream as ZTcpStream>::Rx<'a>>),
+    Udp(LinkUdpRx<<Platform::UdpSocket as ZUdpSocket>::Rx<'a>>),
+    Ws(LinkWsRx<<Platform::WebSocket as ZWebSocket>::Rx<'a>>),
 }
 
-pub(crate) enum Link<T: Platform> {
-    LinkTcp(LinkTcp<T::AbstractedTcpStream>),
-    LinkWs(LinkWs<T::AbstractedWsStream>),
+pub enum Link<Platform>
+where
+    Platform: ZPlatform,
+{
+    Tcp(LinkTcp<Platform::TcpStream>),
+    Udp(LinkUdp<Platform::UdpSocket>),
+    Ws(LinkWs<Platform::WebSocket>),
 }
 
-impl<T: Platform> Link<T> {
-    pub(crate) async fn new(platform: &T, endpoint: EndPoint) -> ZResult<Self, ZLinkError> {
+impl<Platform> ZLinkInfo for Link<Platform>
+where
+    Platform: ZPlatform,
+{
+    fn mtu(&self) -> u16 {
+        match self {
+            Self::Tcp(tcp) => tcp.mtu(),
+            Self::Udp(udp) => udp.mtu(),
+            Self::Ws(ws) => ws.mtu(),
+        }
+    }
+
+    fn is_streamed(&self) -> bool {
+        match self {
+            Self::Tcp(tcp) => tcp.is_streamed(),
+            Self::Udp(udp) => udp.is_streamed(),
+            Self::Ws(ws) => ws.is_streamed(),
+        }
+    }
+}
+
+impl<'a, Platform> ZLinkInfo for LinkTx<'a, Platform>
+where
+    Platform: ZPlatform + 'a,
+{
+    fn mtu(&self) -> u16 {
+        match self {
+            Self::Tcp(tcp) => tcp.mtu(),
+            Self::Udp(udp) => udp.mtu(),
+            Self::Ws(ws) => ws.mtu(),
+        }
+    }
+
+    fn is_streamed(&self) -> bool {
+        match self {
+            Self::Tcp(tcp) => tcp.is_streamed(),
+            Self::Udp(udp) => udp.is_streamed(),
+            Self::Ws(ws) => ws.is_streamed(),
+        }
+    }
+}
+
+impl<'a, Platform> ZLinkInfo for LinkRx<'a, Platform>
+where
+    Platform: ZPlatform + 'a,
+{
+    fn mtu(&self) -> u16 {
+        match self {
+            Self::Tcp(tcp) => tcp.mtu(),
+            Self::Udp(udp) => udp.mtu(),
+            Self::Ws(ws) => ws.mtu(),
+        }
+    }
+
+    fn is_streamed(&self) -> bool {
+        match self {
+            Self::Tcp(tcp) => tcp.is_streamed(),
+            Self::Udp(udp) => udp.is_streamed(),
+            Self::Ws(ws) => ws.is_streamed(),
+        }
+    }
+}
+
+impl<Platform> ZLinkTx for Link<Platform>
+where
+    Platform: ZPlatform,
+{
+    async fn write(&mut self, buffer: &[u8]) -> core::result::Result<usize, crate::LinkError> {
+        match self {
+            Self::Tcp(tcp) => tcp.write(buffer).await,
+            Self::Udp(udp) => udp.write(buffer).await,
+            Self::Ws(ws) => ws.write(buffer).await,
+        }
+    }
+
+    async fn write_all(&mut self, buffer: &[u8]) -> core::result::Result<(), crate::LinkError> {
+        match self {
+            Self::Tcp(tcp) => tcp.write_all(buffer).await,
+            Self::Udp(udp) => udp.write_all(buffer).await,
+            Self::Ws(ws) => ws.write_all(buffer).await,
+        }
+    }
+}
+
+impl<'a, Platform> ZLinkTx for LinkTx<'a, Platform>
+where
+    Platform: ZPlatform + 'a,
+{
+    async fn write(&mut self, buffer: &[u8]) -> core::result::Result<usize, crate::LinkError> {
+        match self {
+            Self::Tcp(tcp) => tcp.write(buffer).await,
+            Self::Udp(udp) => udp.write(buffer).await,
+            Self::Ws(ws) => ws.write(buffer).await,
+        }
+    }
+
+    async fn write_all(&mut self, buffer: &[u8]) -> core::result::Result<(), crate::LinkError> {
+        match self {
+            Self::Tcp(tcp) => tcp.write_all(buffer).await,
+            Self::Udp(udp) => udp.write_all(buffer).await,
+            Self::Ws(ws) => ws.write_all(buffer).await,
+        }
+    }
+}
+
+impl<Platform> ZLinkRx for Link<Platform>
+where
+    Platform: ZPlatform,
+{
+    async fn read(&mut self, buffer: &mut [u8]) -> core::result::Result<usize, crate::LinkError> {
+        match self {
+            Self::Tcp(tcp) => tcp.read(buffer).await,
+            Self::Udp(udp) => udp.read(buffer).await,
+            Self::Ws(ws) => ws.read(buffer).await,
+        }
+    }
+
+    async fn read_exact(
+        &mut self,
+        buffer: &mut [u8],
+    ) -> core::result::Result<(), crate::LinkError> {
+        match self {
+            Self::Tcp(tcp) => tcp.read_exact(buffer).await,
+            Self::Udp(udp) => udp.read_exact(buffer).await,
+            Self::Ws(ws) => ws.read_exact(buffer).await,
+        }
+    }
+}
+
+impl<'a, Platform> ZLinkRx for LinkRx<'a, Platform>
+where
+    Platform: ZPlatform + 'a,
+{
+    async fn read(&mut self, buffer: &mut [u8]) -> core::result::Result<usize, crate::LinkError> {
+        match self {
+            Self::Tcp(tcp) => tcp.read(buffer).await,
+            Self::Udp(udp) => udp.read(buffer).await,
+            Self::Ws(ws) => ws.read(buffer).await,
+        }
+    }
+
+    async fn read_exact(
+        &mut self,
+        buffer: &mut [u8],
+    ) -> core::result::Result<(), crate::LinkError> {
+        match self {
+            Self::Tcp(tcp) => tcp.read_exact(buffer).await,
+            Self::Udp(udp) => udp.read_exact(buffer).await,
+            Self::Ws(ws) => ws.read_exact(buffer).await,
+        }
+    }
+}
+
+impl<Platform> ZLink for Link<Platform>
+where
+    Platform: ZPlatform,
+{
+    type Tx<'a>
+        = LinkTx<'a, Platform>
+    where
+        Self: 'a;
+
+    type Rx<'a>
+        = LinkRx<'a, Platform>
+    where
+        Self: 'a;
+
+    fn split(&mut self) -> (LinkTx<'_, Platform>, LinkRx<'_, Platform>) {
+        match self {
+            Self::Tcp(tcp) => {
+                let (tx, rx) = tcp.split();
+                (LinkTx::Tcp(tx), LinkRx::Tcp(rx))
+            }
+            Self::Udp(udp) => {
+                let (tx, rx) = udp.split();
+                (LinkTx::Udp(tx), LinkRx::Udp(rx))
+            }
+            Self::Ws(ws) => {
+                let (tx, rx) = ws.split();
+                (LinkTx::Ws(tx), LinkRx::Ws(rx))
+            }
+        }
+    }
+}
+
+impl<Platform> Link<Platform>
+where
+    Platform: ZPlatform,
+{
+    pub(crate) async fn new(
+        platform: &Platform,
+        endpoint: EndPoint<'_>,
+    ) -> core::result::Result<Self, crate::LinkError> {
         let protocol = endpoint.protocol();
         let address = endpoint.address();
 
         match protocol.as_str() {
             "tcp" => {
                 let dst_addr = SocketAddr::from_str(address.as_str())
-                    .map_err(|_| ZLinkError::CouldNotParse)?;
+                    .map_err(|_| crate::EndpointError::CouldNotParseAddress)?;
 
                 let stream = platform.new_tcp_stream(&dst_addr).await?;
 
-                Ok(Self::LinkTcp(LinkTcp::new(stream)))
+                Ok(Self::Tcp(LinkTcp::new(stream)))
+            }
+            "udp" => {
+                let dst_addr = SocketAddr::from_str(address.as_str())
+                    .map_err(|_| crate::EndpointError::CouldNotParseAddress)?;
+
+                let socket = platform.new_udp_socket(&dst_addr).await?;
+
+                Ok(Self::Udp(LinkUdp::new(socket)))
             }
             "ws" => {
                 let dst_addr = SocketAddr::from_str(address.as_str())
-                    .map_err(|_| ZLinkError::CouldNotParse)?;
+                    .map_err(|_| crate::EndpointError::CouldNotParseAddress)?;
 
                 let stream = platform.new_websocket_stream(&dst_addr).await?;
 
-                Ok(Self::LinkWs(LinkWs::new(stream)))
+                Ok(Self::Ws(LinkWs::new(stream)))
             }
-            _ => Err(ZLinkError::CouldNotConnect),
-        }
-    }
-
-    pub(crate) fn split(&mut self) -> (LinkTx<'_, T>, LinkRx<'_, T>) {
-        match self {
-            Self::LinkTcp(tcp) => {
-                let (tx, rx) = tcp.split();
-                (LinkTx::LinkTcpTx(tx), LinkRx::LinkTcpRx(rx))
-            }
-            Self::LinkWs(ws) => {
-                let (tx, rx) = ws.split();
-                (LinkTx::LinkWsTx(tx), LinkRx::LinkWsRx(rx))
-            }
-        }
-    }
-
-    pub(crate) fn is_streamed(&self) -> bool {
-        match self {
-            Self::LinkTcp(tcp) => tcp.is_streamed(),
-            Self::LinkWs(ws) => ws.is_streamed(),
-        }
-    }
-
-    pub(crate) fn mtu(&self) -> u16 {
-        match self {
-            Self::LinkTcp(tcp) => tcp.mtu(),
-            Self::LinkWs(ws) => ws.mtu(),
-        }
-    }
-
-    pub(crate) async fn write_all(&mut self, buffer: &[u8]) -> ZResult<(), ZLinkError> {
-        match self {
-            Self::LinkTcp(tcp) => tcp.write_all(buffer).await,
-            Self::LinkWs(ws) => ws.write_all(buffer).await,
-        }
-    }
-
-    pub(crate) async fn read(&mut self, buffer: &mut [u8]) -> ZResult<usize, ZLinkError> {
-        match self {
-            Self::LinkTcp(tcp) => tcp.read(buffer).await,
-            Self::LinkWs(ws) => ws.read(buffer).await,
-        }
-    }
-
-    pub(crate) async fn read_exact(&mut self, buffer: &mut [u8]) -> ZResult<(), ZLinkError> {
-        match self {
-            Self::LinkTcp(tcp) => tcp.read_exact(buffer).await,
-            Self::LinkWs(ws) => ws.read_exact(buffer).await,
-        }
-    }
-}
-
-impl<T: Platform> LinkTx<'_, T> {
-    pub(crate) fn is_streamed(&self) -> bool {
-        match self {
-            Self::LinkTcpTx(tcp) => tcp.is_streamed(),
-            Self::LinkWsTx(ws) => ws.is_streamed(),
-        }
-    }
-
-    pub(crate) async fn write_all(&mut self, buffer: &[u8]) -> ZResult<(), ZLinkError> {
-        match self {
-            Self::LinkTcpTx(tcp) => tcp.write_all(buffer).await,
-            Self::LinkWsTx(ws) => ws.write_all(buffer).await,
-        }
-    }
-}
-
-impl<T: Platform> LinkRx<'_, T> {
-    pub(crate) fn is_streamed(&self) -> bool {
-        match self {
-            Self::LinkTcpRx(tcp) => tcp.is_streamed(),
-            Self::LinkWsRx(ws) => ws.is_streamed(),
-        }
-    }
-
-    pub(crate) async fn read(&mut self, buffer: &mut [u8]) -> ZResult<usize, ZLinkError> {
-        match self {
-            Self::LinkTcpRx(tcp) => tcp.read(buffer).await,
-            Self::LinkWsRx(ws) => ws.read(buffer).await,
-        }
-    }
-
-    pub(crate) async fn read_exact(&mut self, buffer: &mut [u8]) -> ZResult<(), ZLinkError> {
-        match self {
-            Self::LinkTcpRx(tcp) => tcp.read_exact(buffer).await,
-            Self::LinkWsRx(ws) => ws.read_exact(buffer).await,
+            _ => Err(crate::EndpointError::CouldNotParseProtocol.into()),
         }
     }
 }

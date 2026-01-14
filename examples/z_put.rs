@@ -3,47 +3,43 @@
 #![cfg_attr(feature = "wasm", no_main)]
 
 use zenoh_examples::*;
-use zenoh_nostd::{EndPoint, keyexpr};
+use zenoh_nostd as zenoh;
 
-const CONNECT: &str = match option_env!("CONNECT") {
-    Some(v) => v,
-    None => {
-        if cfg!(feature = "wasm") {
-            "ws/127.0.0.1:7446"
-        } else {
-            "tcp/127.0.0.1:7447"
-        }
-    }
-};
-
-async fn entry(spawner: embassy_executor::Spawner) -> zenoh_nostd::ZResult<()> {
+async fn entry(spawner: embassy_executor::Spawner) -> zenoh::ZResult<()> {
     #[cfg(feature = "log")]
     env_logger::init();
 
-    zenoh_nostd::info!("zenoh-nostd z_put example");
+    zenoh::info!("zenoh-nostd z_put example");
 
-    let platform = init_platform(&spawner).await;
-    let config = zenoh_nostd::zconfig!(
-            Platform: (spawner, platform),
-            TX: 512,
-            RX: 512,
-            MAX_SUBSCRIBERS: 2,
-            MAX_QUERIES: 2,
-            MAX_QUERYABLES: 2
-    );
+    let config = init_example(&spawner).await;
+    let mut resources = zenoh::Resources::new();
+    let session = zenoh::open(&mut resources, config, zenoh::EndPoint::try_from(CONNECT)?).await?;
 
-    let session = zenoh_nostd::open!(config, EndPoint::try_from(CONNECT)?);
+    // In this example we don't care about maintaining the session alive but we do it anyway for demonstration purpose. Know
+    // that it's not mandatory to do a `session.run()` if you just need to `put` a value on the network.
+    // We then have two choices:
+    //  1) Spawn a new task to run the `session.run()` in background, but it requires the `session` to be `'static`.
+    //  2) Use `select` or `join` to run both the session and the subscriber in the same task.
+    // Here we use the second approach. For a demonstration of the first approach, see the `z_open` example.
 
-    let ke = keyexpr::new("demo/example")?;
+    let ke = zenoh::keyexpr::new("demo/example")?;
     let payload = b"Hello, from no-std!";
 
-    session.put(ke, payload).await?;
-
-    zenoh_nostd::info!(
-        "[Put] Sent PUT ('{}': '{}')",
-        ke.as_str(),
-        core::str::from_utf8(payload).unwrap()
-    );
+    embassy_futures::select::select(session.run(), async {
+        match session.put(ke, payload).finish().await {
+            Ok(_) => {
+                zenoh::info!(
+                    "[Put] Sent PUT ('{}': '{}')",
+                    ke.as_str(),
+                    core::str::from_utf8(payload).unwrap()
+                );
+            }
+            Err(e) => {
+                zenoh::error!("{}", e)
+            }
+        };
+    })
+    .await;
 
     Ok(())
 }
@@ -53,10 +49,10 @@ async fn entry(spawner: embassy_executor::Spawner) -> zenoh_nostd::ZResult<()> {
 #[cfg_attr(feature = "esp32s3", esp_rtos::main)]
 async fn main(spawner: embassy_executor::Spawner) {
     if let Err(e) = entry(spawner).await {
-        zenoh_nostd::error!("Error in main: {:?}", e);
+        zenoh::error!("Error in main: {}", e);
     }
 
-    zenoh_nostd::info!("Exiting main");
+    zenoh::info!("Exiting main");
 }
 
 #[cfg(feature = "esp32s3")]

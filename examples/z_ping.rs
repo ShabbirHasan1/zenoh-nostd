@@ -4,86 +4,87 @@
 
 use embassy_time::{Duration, Instant};
 use zenoh_examples::*;
-use zenoh_nostd::{EndPoint, keyexpr, zsubscriber};
+use zenoh_nostd::{self as zenoh, SessionError};
 
-const CONNECT: &str = match option_env!("CONNECT") {
-    Some(v) => v,
-    None => {
-        if cfg!(feature = "wasm") {
-            "ws/127.0.0.1:7446"
-        } else {
-            "tcp/127.0.0.1:7447"
-        }
+#[embassy_executor::task]
+async fn session_task(session: &'static zenoh::Session<'static, ExampleConfig>) {
+    if let Err(e) = session.run().await {
+        zenoh::error!("Error in session task: {}", e);
     }
-};
+}
 
-async fn entry(spawner: embassy_executor::Spawner) -> zenoh_nostd::ZResult<()> {
+async fn entry(spawner: embassy_executor::Spawner) -> zenoh::ZResult<()> {
     #[cfg(feature = "log")]
     env_logger::init();
 
-    zenoh_nostd::info!("zenoh-nostd z_ping example");
+    zenoh::info!("zenoh-nostd z_ping example");
 
-    let platform = init_platform(&spawner).await;
-    let config = zenoh_nostd::zconfig!(
-            Platform: (spawner, platform),
-            TX: 512,
-            RX: 512,
-            MAX_SUBSCRIBERS: 2,
-            MAX_QUERIES: 2,
-            MAX_QUERYABLES: 2
-    );
+    // All channels that will be used must outlive `Resources`.
+    // **Note**: as a direct implication, here you need to make a static channel.
+    static CHANNEL: static_cell::StaticCell<
+        embassy_sync::channel::Channel<
+            embassy_sync::blocking_mutex::raw::NoopRawMutex,
+            zenoh::OwnedSample<128, 128>,
+            8,
+        >,
+    > = static_cell::StaticCell::new();
+    let channel = CHANNEL.init(embassy_sync::channel::Channel::new());
 
-    let session = zenoh_nostd::open!(config, EndPoint::try_from(CONNECT)?);
+    let config = init_example(&spawner).await;
+    let session = zenoh::open!(config => ExampleConfig, zenoh::EndPoint::try_from(CONNECT)?);
 
-    let ke_pong = keyexpr::new("test/pong")?;
-    let ke_ping = keyexpr::new("test/ping")?;
+    spawner.spawn(session_task(session)).map_err(|e| {
+        zenoh::error!("Error spawning task: {}", e);
+        zenoh::SessionError::CouldNotSpawnEmbassyTask
+    })?;
 
-    let sub = session
-        .declare_subscriber(
-            ke_pong,
-            zsubscriber!(QUEUE_SIZE: 8, MAX_KEYEXPR: 32, MAX_PAYLOAD: 128),
-        )
+    let ping = session
+        .declare_publisher(zenoh::keyexpr::new("test/ping")?)
+        .finish()
         .await?;
 
-    let data = [0, 1, 2, 3, 4, 5, 6, 7];
+    let pong = session
+        .declare_subscriber(zenoh::keyexpr::new("test/pong")?)
+        .channel(channel.dyn_sender(), channel.dyn_receiver())
+        .finish()
+        .await?;
 
-    #[cfg(feature = "esp32s3")]
-    extern crate alloc;
-    #[cfg(feature = "esp32s3")]
-    use alloc::vec::Vec;
+    let data: [u8; PAYLOAD] = core::array::from_fn(|i| (i % 10) as u8);
+    let mut samples = [0u64; 100];
 
-    let mut samples = Vec::<u64>::with_capacity(100);
-
-    zenoh_nostd::info!("Warming up for 1s");
+    zenoh::info!("Warming up for 1s");
     let now = Instant::now();
 
     while now.elapsed() < Duration::from_secs(1) {
-        session.put(ke_ping, &data).await?;
-
-        let _ = sub.recv().await?;
+        ping.put(&data).finish().await?;
+        let _ = pong.recv().await.ok_or(SessionError::ChannelClosed)?;
     }
 
-    zenoh_nostd::info!("Starting ping-pong measurements");
+    zenoh::info!("Starting ping-pong measurements");
 
-    for _ in 0..100 {
+    for sample in samples.iter_mut() {
         let start = Instant::now();
 
-        session.put(ke_ping, &data).await?;
+        ping.put(&data).finish().await?;
+        let _ = pong.recv().await.ok_or(SessionError::ChannelClosed)?;
 
-        let _ = sub.recv().await?;
-
-        let elapsed = start.elapsed().as_micros();
-        samples.push(elapsed);
+        *sample = start.elapsed().as_micros();
     }
 
-    for (i, rtt) in samples.iter().enumerate().take(100) {
-        zenoh_nostd::info!("{} bytes: seq={} rtt={:?}µs lat={:?}µs", 8, i, rtt, rtt / 2);
+    for (i, rtt) in samples.iter().enumerate() {
+        zenoh::info!(
+            "{} bytes: seq={} rtt={:?}µs lat={:?}µs",
+            data.len(),
+            i,
+            rtt,
+            rtt / 2
+        );
     }
 
     let avg_rtt: u64 = samples.iter().sum::<u64>() / samples.len() as u64;
     let avg_lat: u64 = avg_rtt / 2;
 
-    zenoh_nostd::info!(
+    zenoh::info!(
         "Average RTT: {:?}µs, Average Latency: {:?}µs",
         avg_rtt,
         avg_lat
@@ -97,10 +98,10 @@ async fn entry(spawner: embassy_executor::Spawner) -> zenoh_nostd::ZResult<()> {
 #[cfg_attr(feature = "esp32s3", esp_rtos::main)]
 async fn main(spawner: embassy_executor::Spawner) {
     if let Err(e) = entry(spawner).await {
-        zenoh_nostd::error!("Error in main: {:?}", e);
+        zenoh::error!("Error in main: {}", e);
     }
 
-    zenoh_nostd::info!("Exiting main");
+    zenoh::info!("Exiting main");
 }
 
 #[cfg(feature = "esp32s3")]
